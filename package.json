@@ -1,0 +1,64 @@
+{
+  "name": "yui-launcher",
+  "version": "2026.1107.1",
+  "private": true,
+  "description": "Launch and update Yui apps",
+  "main": "electron/main.cjs",
+  "author": "YUI",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"tests/unit/*.test.cjs\"",
+    "test:ui": "node tests/ui.cjs",
+    "icon": "node scripts/make-icon.cjs",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2"
+  },
+  "build": {
+    "appId": "com.suzunayui.yuilauncher",
+    "productName": "YuiLauncher",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "YuiLauncher-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "suzunayui",
+        "repo": "YuiLauncher"
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+    <title>YuiLauncher</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>YuiLauncher</h1>
+        <p id="summary" class="summary" aria-live="polite"></p>
+      </div>
+      <button id="check" class="button">更新を確認</button>
+    </header>
+
+    <div id="self-update" class="self-update" hidden>
+      <span id="self-update-text"></span>
+      <button id="self-update-install" class="button primary">再起動して更新</button>
+    </div>
+
+    <main id="apps" class="apps"></main>
+
+    <dialog id="close-dialog" class="dialog">
+      <h2 id="close-title"></h2>
+      <p id="close-body"></p>
+      <div class="dialog-actions">
+        <button id="close-cancel" class="button">やめる</button>
+        <button id="close-confirm" class="button primary">閉じて更新</button>
+      </div>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>

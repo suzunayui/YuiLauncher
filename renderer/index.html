@@ -2,8 +2,9 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ipc: http://ipc.localhost">
     <title>YuiLauncher</title>
+    <link rel="icon" href="../assets/icon.ico">
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
@@ -36,6 +37,7 @@
       </div>
     </dialog>
 
+    <script src="bridge.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

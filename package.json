@@ -3,62 +3,18 @@
   "version": "2026.1107.9",
   "private": true,
   "description": "Launch and update Yui apps",
-  "main": "electron/main.cjs",
   "author": "YUI",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "test": "node --test \"tests/unit/*.test.cjs\"",
+    "start": "node scripts/prepare-tauri-frontend.cjs && cargo run --manifest-path src-tauri/Cargo.toml",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:ui": "node tests/ui.cjs",
     "icon": "node scripts/make-icon.cjs",
-    "dist": "electron-builder --win nsis --publish never"
-  },
-  "dependencies": {
-    "electron-updater": "^6.6.2"
+    "dist": "tauri build && node scripts/package-release.cjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "electron": "^45.2.3",
-    "electron-builder": "^26.15.3",
+    "@tauri-apps/cli": "^2.12.4",
     "png-to-ico": "^3.0.2"
-  },
-  "build": {
-    "appId": "com.suzunayui.yuilauncher",
-    "productName": "YuiLauncher",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "electron/**/*",
-      "renderer/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "win": {
-      "icon": "assets/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "createDesktopShortcut": true,
-      "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico",
-      "artifactName": "YuiLauncher-Setup-${version}.${ext}"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "suzunayui",
-        "repo": "YuiLauncher"
-      }
-    ]
   }
 }

@@ -4,6 +4,8 @@ Yuiアプリの起動とアップデートをまとめて行うWindows向けラ�
 
 ## 開発
 
+Rustが必要です。Tauriで動きます。
+
 ```bash
 npm install
 npm start
@@ -17,7 +19,7 @@ npm test
 npm run test:ui
 ```
 
-`npm run test:ui`は`tests/fixture.cjs`の偽データで動くため、GitHubや実際のアプリには触れません。
+`npm run test:ui`はデバッグビルドの画面を`src-tauri/src/fixture.rs`の偽データで動かすため、GitHubや実際のアプリには触れません。
 
 ## アイコン
 
@@ -25,10 +27,10 @@ npm run test:ui
 
 ## アプリの追加
 
-`electron/catalog.cjs`に1件追加し、アイコンを`assets/apps`に置きます。対象アプリのGitHub Releasesには次が必要です。
+`src-tauri/src/catalog.rs`に1件追加し、アイコンを`assets/apps`に置きます。対象アプリのGitHub Releasesには次が必要です。
 
-- Windows用インストーラー（`installerPattern`に一致する名前）
-- インストーラーのSHA-256を記載したチェックサムファイル（`checksumPattern`に一致する名前）
+- Windows用インストーラー（`installer_prefix`、バージョン、`installer_suffix`をつなげた名前）
+- インストーラーのSHA-256を記載したチェックサムファイル（`SHA256SUMS`で始まる`.txt`）
 - `v2026.1107.1`形式のタグ。`-mac.1`や`-beta`が付くタグは対象外です
 
 ## 更新の流れ
@@ -51,7 +53,13 @@ npm run test:ui
 
 起動時と6時間ごと、「更新を確認」を押したときに確認します。失敗すると画面に表示し、30分後に再試行します。
 
-詳しい経過は`%APPDATA%\yui-launcher\logs\self-update.log`に残ります。1MBを超えると`self-update.log.old`に切り替わります。
+他のアプリと同じように、ダウンロードしてSHA-256を検証します。インストールは「再起動して更新」を押したとき、または終了するときに行います。
+
+詳しい経過は`%LOCALAPPDATA%\com.suzunayui.yuilauncher\logs\self-update.log`に残ります。1MBを超えると`self-update.log.old`に切り替わります。
+
+## Electron版からの移行
+
+以前のElectron版は`electron-updater`で`latest.yml`を読んで更新します。そのためリリースには`latest.yml`も載せます。Electron版がこのインストーラーを実行すると、`src-tauri/installer-hooks.nsh`がElectron版を削除してから入れ替え、新しいランチャーを起動します。
 
 ## リリース
 
@@ -65,4 +73,4 @@ npm version 2026.1107.1 --no-git-tag-version
 npm run dist
 ```
 
-`release`にインストーラーと`latest.yml`が作られます。ランチャー自身の更新には、`suzunayui/YuiLauncher`のGitHub Releaseに、インストーラー、`.blockmap`、`latest.yml`を公開します。
+`release`にインストーラー、チェックサム、`latest.yml`が作られます。この3つを`suzunayui/YuiLauncher`のGitHub Releaseに公開します。

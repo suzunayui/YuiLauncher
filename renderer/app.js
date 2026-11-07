@@ -27,6 +27,16 @@ const elements = {
 
 let pendingConfirm = null;
 const icons = new Map();
+// While a card is dragged, state changes wait here so the card isn't rebuilt under the pointer.
+let drag = null;
+let pendingState = null;
+
+const GRIP = '<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">'
+  + '<circle cx="2" cy="2" r="1.5"/><circle cx="8" cy="2" r="1.5"/>'
+  + '<circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/>'
+  + '<circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/></svg>';
+
+const shownIds = () => [...elements.apps.children].map(card => card.dataset.app);
 
 // Cards are rebuilt on every state change; reusing the image keeps it from flickering.
 function iconFor(app) {
@@ -51,6 +61,79 @@ function button(label, key, onClick, { primary = false, disabled = false } = {})
   node.dataset.key = key;
   node.disabled = disabled;
   node.addEventListener('click', onClick);
+  return node;
+}
+
+// Moves the neighbours rather than the dragged card: taking it out of the page would drop the pointer.
+function followPointer(event) {
+  const { card, grab } = drag;
+  card.style.transform = '';
+  const top = event.clientY - grab;
+  let previous = card.previousElementSibling;
+  while (previous && top < previous.getBoundingClientRect().top + previous.offsetHeight / 2) {
+    elements.apps.insertBefore(previous, card.nextElementSibling);
+    previous = card.previousElementSibling;
+  }
+  let next = card.nextElementSibling;
+  while (next && top + card.offsetHeight > next.getBoundingClientRect().top + next.offsetHeight / 2) {
+    elements.apps.insertBefore(next, card);
+    next = card.nextElementSibling;
+  }
+  card.style.transform = `translateY(${top - card.getBoundingClientRect().top}px)`;
+}
+
+function endDrag() {
+  const { card, handle, before } = drag;
+  handle.removeEventListener('pointermove', followPointer);
+  handle.removeEventListener('pointerup', endDrag);
+  handle.removeEventListener('pointercancel', endDrag);
+  card.style.transform = '';
+  card.classList.remove('dragging');
+  document.body.classList.remove('dragging');
+  drag = null;
+  const after = shownIds();
+  const waiting = pendingState;
+  pendingState = null;
+  // A new order comes back as a state change, so the old one waiting here would flash.
+  if (after.join() !== before.join()) window.launcher.setOrder(after);
+  else if (waiting) render(waiting);
+}
+
+function startDrag(event) {
+  if (event.button !== 0 || drag) return;
+  event.preventDefault();
+  const handle = event.currentTarget;
+  const card = handle.closest('.card');
+  handle.setPointerCapture(event.pointerId);
+  drag = { card, handle, before: shownIds(), grab: event.clientY - card.getBoundingClientRect().top };
+  card.classList.add('dragging');
+  document.body.classList.add('dragging');
+  handle.addEventListener('pointermove', followPointer);
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+}
+
+function moveByKey(event, app) {
+  const step = { ArrowUp: -1, ArrowDown: 1 }[event.key];
+  if (!step || drag) return;
+  event.preventDefault();
+  const ids = shownIds();
+  const from = ids.indexOf(app.id);
+  const to = from + step;
+  if (to < 0 || to >= ids.length) return;
+  [ids[from], ids[to]] = [ids[to], ids[from]];
+  window.launcher.setOrder(ids);
+}
+
+function handleFor(app) {
+  const node = el('button', 'handle');
+  node.type = 'button';
+  node.innerHTML = GRIP;
+  node.dataset.key = `${app.id}:move`;
+  node.title = 'ドラッグして並べ替え';
+  node.setAttribute('aria-label', `${app.name}を移動（上下の矢印キーで並べ替え）`);
+  node.addEventListener('pointerdown', startDrag);
+  node.addEventListener('keydown', event => moveByKey(event, app));
   return node;
 }
 
@@ -152,7 +235,7 @@ function card(app) {
     const primary = !app.updateAvailable;
     actions.append(button('開く', `${app.id}:open`, () => window.launcher.open(app.id), { primary, disabled: busy || !app.canOpen }));
   }
-  main.append(iconFor(app), info, actions);
+  main.append(handleFor(app), iconFor(app), info, actions);
   node.append(main);
 
   if (app.task) node.append(progress(app));
@@ -188,6 +271,10 @@ function renderSelfUpdate(state) {
 }
 
 function render(state) {
+  if (drag) {
+    pendingState = state;
+    return;
+  }
   elements.selfUpdateInstall.disabled = state.apps.some(app => app.task);
   const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
   elements.apps.replaceChildren(...state.apps.map(card));

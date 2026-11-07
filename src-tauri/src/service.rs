@@ -102,6 +102,24 @@ pub struct Service {
     confirm_interval: Duration,
     store: Mutex<Store>,
     check_done: Condvar,
+    // Indexes into apps, in the order the page shows them.
+    order: Mutex<Vec<usize>>,
+    settings_file: Option<PathBuf>,
+}
+
+/// Puts the known ids first, in the given order, then any app the list doesn't name.
+fn order_from(apps: &[AppDef], ids: &[String]) -> Vec<usize> {
+    let mut order: Vec<usize> = Vec::new();
+    for id in ids {
+        if let Some(index) = apps.iter().position(|app| app.id == id) {
+            if !order.contains(&index) {
+                order.push(index);
+            }
+        }
+    }
+    let missing: Vec<usize> = (0..apps.len()).filter(|index| !order.contains(index)).collect();
+    order.extend(missing);
+    order
 }
 
 fn update_available(entry: &Entry) -> bool {
@@ -152,7 +170,36 @@ impl Service {
             confirm_interval,
             store: Mutex::new(Store { entries: apps.iter().map(|_| Entry::default()).collect(), ..Store::default() }),
             check_done: Condvar::new(),
+            order: Mutex::new((0..apps.len()).collect()),
+            settings_file: None,
         }
+    }
+
+    /// Keeps the order of the apps in this file. A missing or broken file means the catalog's order.
+    pub fn with_settings(mut self, file: PathBuf) -> Self {
+        let saved: Vec<String> = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|settings| serde_json::from_value(settings["order"].clone()).ok())
+            .unwrap_or_default();
+        *self.order.get_mut().unwrap() = order_from(self.apps, &saved);
+        self.settings_file = Some(file);
+        self
+    }
+
+    pub fn set_order(&self, ids: &[String]) -> Result<(), String> {
+        let order = order_from(self.apps, ids);
+        *self.order.lock().unwrap() = order.clone();
+        self.changed();
+        let Some(file) = &self.settings_file else { return Ok(()) };
+        let ids: Vec<&str> = order.iter().map(|index| self.apps[*index].id).collect();
+        let write = || -> std::io::Result<()> {
+            if let Some(parent) = file.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(file, serde_json::json!({ "order": ids }).to_string())
+        };
+        write().map_err(|error| format!("並び順を保存できませんでした（{error}）"))
     }
 
     fn index_of(&self, id: &str) -> Result<usize, String> {
@@ -160,14 +207,14 @@ impl Service {
     }
 
     pub fn snapshot(&self) -> StateView {
+        let order = self.order.lock().unwrap().clone();
         let store = self.store.lock().unwrap();
         StateView {
             checking: store.checking,
             last_checked_at: store.last_checked_at,
-            apps: self
-                .apps
+            apps: order
                 .iter()
-                .zip(&store.entries)
+                .map(|index| (&self.apps[*index], &store.entries[*index]))
                 .map(|(app, entry)| AppView {
                     id: app.id,
                     name: app.name,
@@ -1077,6 +1124,62 @@ mod tests {
         let setup = setup(|_| {});
         assert!(setup.service.install("nope", false).is_err());
         assert!(setup.service.open("nope").is_err());
+    }
+
+    fn catalog_service(fake: &Arc<Fake>, settings: &Path) -> Service {
+        Service::new(
+            &crate::catalog::APPS,
+            fake.clone(),
+            fake.clone(),
+            fake.clone(),
+            std::env::temp_dir(),
+            Box::new(|_| {}),
+            Duration::from_millis(20),
+            Duration::from_millis(1),
+        )
+        .with_settings(settings.to_path_buf())
+    }
+
+    fn ids(service: &Service) -> Vec<&'static str> {
+        service.snapshot().apps.iter().map(|app| app.id).collect()
+    }
+
+    #[test]
+    fn shows_the_catalog_order_until_one_is_chosen() {
+        let setup = setup(|_| {});
+        let temp = temp_dir();
+        let service = catalog_service(&setup.fake, &temp.join("settings.json"));
+        assert_eq!(ids(&service), ["yuitracking", "yuivoicechanger", "yuilivekit"]);
+    }
+
+    #[test]
+    fn keeps_a_chosen_order_across_restarts() {
+        let setup = setup(|_| {});
+        let temp = temp_dir();
+        let file = temp.join("nested").join("settings.json");
+        let service = catalog_service(&setup.fake, &file);
+        service.set_order(&["yuilivekit".to_string(), "yuitracking".to_string(), "yuivoicechanger".to_string()]).unwrap();
+        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+    }
+
+    #[test]
+    fn ignores_unknown_and_repeated_ids_and_adds_apps_the_order_leaves_out() {
+        let setup = setup(|_| {});
+        let temp = temp_dir();
+        let service = catalog_service(&setup.fake, &temp.join("settings.json"));
+        let chosen = ["nope", "yuilivekit", "yuilivekit"].map(str::to_string);
+        service.set_order(&chosen).unwrap();
+        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+    }
+
+    #[test]
+    fn a_broken_settings_file_means_the_catalog_order() {
+        let setup = setup(|_| {});
+        let temp = temp_dir();
+        let file = temp.join("settings.json");
+        std::fs::write(&file, "{not json").unwrap();
+        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuitracking", "yuivoicechanger", "yuilivekit"]);
     }
 
     #[test]

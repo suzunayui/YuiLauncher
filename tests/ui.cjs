@@ -128,6 +128,38 @@ async function run(page) {
   }
   await page.setViewportSize({ width: 744, height: 563 });
 
+  const order = () => page.locator('.card').evaluateAll(cards => cards.map(card => card.dataset.app));
+  const waitForOrder = async expected => {
+    for (let tries = 0; (await order()).join() !== expected.join() && tries < 50; tries += 1) await page.waitForTimeout(50);
+    assert.deepEqual(await order(), expected);
+  };
+  assert.deepEqual(await order(), ['yuitracking', 'yuivoicechanger', 'yuilivekit']);
+  const handle = card => card.locator('.handle');
+  const handleBox = await handle(tracking).boundingBox();
+  const liveKitBox = await liveKit.boundingBox();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, liveKitBox.y + liveKitBox.height * 0.8, { steps: 12 });
+  assert.ok(await tracking.evaluate(card => card.classList.contains('dragging')), 'the card follows the pointer');
+  await shot('10-dragging');
+  await page.mouse.up();
+  await waitForOrder(['yuivoicechanger', 'yuilivekit', 'yuitracking']);
+  assert.equal(await tracking.evaluate(card => card.style.transform), '', 'the card settles after the drop');
+  await page.reload();
+  await waitForOrder(['yuivoicechanger', 'yuilivekit', 'yuitracking']);
+
+  await handle(tracking).focus();
+  await page.keyboard.press('ArrowUp');
+  await waitForOrder(['yuivoicechanger', 'yuitracking', 'yuilivekit']);
+  assert.equal(await page.evaluate(() => document.activeElement.dataset.key), 'yuitracking:move', 'focus stays on the moved card');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await waitForOrder(['yuitracking', 'yuivoicechanger', 'yuilivekit']);
+
+  // A click on the handle alone changes nothing.
+  await handle(voice).click();
+  await waitForOrder(['yuitracking', 'yuivoicechanger', 'yuilivekit']);
+
   await tracking.getByRole('button', { name: 'アップデート' }).click();
   const dialog = page.locator('#close-dialog');
   await dialog.waitFor();

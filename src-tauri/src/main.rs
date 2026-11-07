@@ -96,6 +96,11 @@ fn cancel(service: State<'_, Arc<Service>>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_order(service: State<'_, Arc<Service>>, ids: Vec<String>) -> Result<(), String> {
+    service.set_order(&ids)
+}
+
+#[tauri::command]
 fn open_release_page(service: State<'_, Arc<Service>>, id: String) -> Result<(), String> {
     match service.release_page_url(&id)? {
         Some(url) => service.open_url(&url),
@@ -171,7 +176,7 @@ fn set_up(app: &AppHandle) -> tauri::Result<()> {
     let backend = real_backend();
 
     let handle = app.clone();
-    app.manage(Arc::new(Service::new(
+    let apps_service = Service::new(
         &APPS,
         backend.system.clone(),
         backend.releases.clone(),
@@ -182,7 +187,14 @@ fn set_up(app: &AppHandle) -> tauri::Result<()> {
         }),
         CONFIRM_TIMEOUT,
         CONFIRM_INTERVAL,
-    )));
+    );
+    // A fixture run keeps its order in memory, away from the real settings.
+    let apps_service = if is_fixture() {
+        apps_service
+    } else {
+        apps_service.with_settings(app.path().app_config_dir()?.join("settings.json"))
+    };
+    app.manage(Arc::new(apps_service));
 
     // A debug build isn't installed, so it has nothing of its own to update.
     let updater = if cfg!(debug_assertions) && !is_fixture() {
@@ -269,6 +281,7 @@ macro_rules! handlers {
             install,
             uninstall,
             cancel,
+            set_order,
             open_release_page,
             open_support_page,
             get_self_update,

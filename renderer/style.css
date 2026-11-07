@@ -166,9 +166,53 @@ h1 {
 
 .card-main {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
+  grid-template-columns: 16px 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
+}
+
+.card.dragging {
+  position: relative;
+  z-index: 1;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+}
+
+body.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 44px;
+  margin-left: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  opacity: 0.6;
+}
+
+.handle:hover,
+.card.dragging .handle {
+  opacity: 1;
+  background: var(--track);
+}
+
+body.dragging .handle {
+  cursor: grabbing;
+}
+
+.handle:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .icon {
@@ -342,7 +386,7 @@ h2.name {
 
 @media (max-width: 600px) {
   .card-main {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 16px 48px minmax(0, 1fr);
   }
   .info {
     padding-right: 0;

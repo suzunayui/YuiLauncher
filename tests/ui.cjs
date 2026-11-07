@@ -42,6 +42,25 @@ async function main() {
     assert.equal(overflow, false, 'no horizontal scroll');
     await shot(page, '1-update-available');
 
+    const setWidth = width => app.evaluate(({ BrowserWindow }, value) => {
+      const [window] = BrowserWindow.getAllWindows();
+      window.setContentSize(value, window.getContentSize()[1]);
+    }, width);
+    for (const width of [744, 680, 620]) {
+      await setWidth(width);
+      await page.waitForFunction(value => window.innerWidth === value, width);
+      for (const card of [tracking, voice]) {
+        const buttons = card.locator('.actions .button');
+        assert.equal(await buttons.last().textContent(), '開く', 'open is the rightmost button');
+        const remove = await card.getByRole('button', { name: 'アンインストール' }).boundingBox();
+        const nearest = await buttons.first().boundingBox();
+        const gap = nearest.x - (remove.x + remove.width);
+        assert.ok(gap >= 40, `uninstall is ${gap}px from the main buttons at width ${width}`);
+      }
+    }
+    await setWidth(744);
+    await page.waitForFunction(() => window.innerWidth === 744);
+
     await tracking.getByRole('button', { name: 'アップデート' }).click();
     const dialog = page.locator('#close-dialog');
     await dialog.waitFor();

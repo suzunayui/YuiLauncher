@@ -91,7 +91,7 @@ function versionLine(app) {
     if (app.latestVersion) line.append(` ・ 最新 ${app.latestVersion}`);
   } else if (app.updateAvailable) {
     line.append(`${app.version || '不明'} → `);
-    line.append(el('strong', '', `${app.latestVersion} にアップデートできます`));
+    line.append(el('strong', '', app.latestVersion));
   } else {
     line.append(app.latestVersion ? `${app.version} ・ 最新です` : app.version || 'バージョン不明');
   }
@@ -101,6 +101,15 @@ function versionLine(app) {
     link.dataset.key = `${app.id}:notes`;
     link.addEventListener('click', () => window.launcher.openReleasePage(app.id));
     line.append(link);
+  }
+  // Kept on the left, away from the main buttons, so it can't be hit by mistake.
+  if (app.canUninstall) {
+    line.append(' ・ ');
+    const remove = el('button', 'link danger', 'アンインストール');
+    remove.dataset.key = `${app.id}:uninstall`;
+    remove.disabled = Boolean(app.task);
+    remove.addEventListener('click', () => startUninstall(app));
+    line.append(remove);
   }
   return line;
 }
@@ -127,7 +136,7 @@ function card(app) {
   node.dataset.app = app.id;
 
   const main = el('div', 'card-main');
-  const info = el('div');
+  const info = el('div', 'info');
   const titleRow = el('div', 'title-row');
   titleRow.append(el('h2', 'name', app.name));
   if (app.running) titleRow.append(el('span', 'running', '起動中'));
@@ -141,11 +150,6 @@ function card(app) {
   if (app.installed) {
     const primary = !app.updateAvailable;
     actions.append(button('開く', `${app.id}:open`, () => window.launcher.open(app.id), { primary, disabled: busy || !app.canOpen }));
-  }
-  if (app.canUninstall) {
-    const remove = button('アンインストール', `${app.id}:uninstall`, () => startUninstall(app), { disabled: busy });
-    remove.classList.add('danger');
-    actions.append(remove);
   }
   main.append(iconFor(app), info, actions);
   node.append(main);

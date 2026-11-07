@@ -11,6 +11,12 @@ function create() {
   const world = {
     yuitracking: { version: '2026.1106.5', running: true, latest: '2026.1107.1' },
     yuivoicechanger: { version: '2026.1104.31', running: false, latest: '2026.1104.31' },
+    yuilivekit: { version: '2026.1107.1', running: false, latest: '2026.1107.1' },
+  };
+  const installerNames = {
+    yuitracking: 'YuiTracking-Setup-2026.1107.1-x64.exe',
+    yuivoicechanger: 'YuiVoiceChanger-Setup-2026.1104.31.exe',
+    yuilivekit: 'YuiLiveKit-Setup-2026.1107.1.exe',
   };
   const catalog = realCatalog;
   return {
@@ -38,7 +44,7 @@ function create() {
         version: world[app.id].latest,
         pageUrl: `https://github.com/${app.repo}/releases/tag/v${world[app.id].latest}`,
         installer: {
-          name: app.id === 'yuitracking' ? 'YuiTracking-Setup-2026.1107.1-x64.exe' : 'YuiVoiceChanger-Setup-2026.1104.31.exe',
+          name: installerNames[app.id],
           size: 100,
           url: 'https://example.invalid/installer',
         },

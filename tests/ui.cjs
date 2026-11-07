@@ -31,6 +31,7 @@ async function main() {
     assert.ok(await tracking.getByText('起動中').isVisible());
     assert.ok(await voice.getByText('最新です').isVisible());
     assert.equal(await voice.getByRole('button', { name: 'アップデート' }).count(), 0);
+    assert.ok(await page.locator('[data-app="yuilivekit"]').getByText('最新です').isVisible());
     const iconsLoaded = await page.locator('.icon').evaluateAll(icons => icons.every(icon => icon.naturalWidth > 0));
     assert.ok(iconsLoaded, 'app icons load');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);

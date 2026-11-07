@@ -27,4 +27,16 @@ module.exports = [
     silentArgs: ['/S'],
     icon: '../assets/apps/YuiVoiceChanger.ico',
   },
+  {
+    id: 'yuilivekit',
+    name: 'YuiLiveKit',
+    description: 'OBS向けのコメント表示と音声字幕',
+    repo: 'suzunayui/YuiLiveKit',
+    registryKey: '54a05e14-5bce-5486-8d4f-9dc5271d69b3',
+    exeName: 'YuiLiveKit.exe',
+    installerPattern: /^YuiLiveKit-Setup-[\d.]+\.exe$/,
+    checksumPattern: /^SHA256SUMS.*\.txt$/,
+    silentArgs: ['/S'],
+    icon: '../assets/apps/YuiLiveKit.ico',
+  },
 ];

@@ -160,6 +160,44 @@ async function run(page) {
   await handle(voice).click();
   await waitForOrder(['yuitracking', 'yuivoicechanger', 'yuilivekit']);
 
+  const hiddenApps = page.locator('#hidden-apps');
+  const hiddenRow = id => page.locator(`.hidden-row[data-app="${id}"]`);
+  assert.equal(await hiddenApps.isVisible(), false, 'no hidden list while nothing is hidden');
+  await tracking.getByRole('button', { name: '非表示', exact: true }).click();
+  await waitForOrder(['yuivoicechanger', 'yuilivekit']);
+  await hiddenApps.getByText('非表示のアプリ（1）').waitFor();
+  assert.equal(await page.getByText('件のアップデートがあります').count(), 0, 'a hidden app is not counted');
+  await hiddenApps.locator('summary').click();
+  assert.ok(await hiddenRow('yuitracking').getByText('アップデートあり').isVisible(), 'its update still shows in the list');
+  await shot('11-hidden');
+
+  // Moving the shown apps keeps the hidden one hidden.
+  await handle(liveKit).focus();
+  await page.keyboard.press('ArrowUp');
+  await waitForOrder(['yuilivekit', 'yuivoicechanger']);
+  await page.reload();
+  await waitForOrder(['yuilivekit', 'yuivoicechanger']);
+  await hiddenApps.getByText('非表示のアプリ（1）').waitFor();
+
+  for (const card of [liveKit, voice]) await card.getByRole('button', { name: '非表示', exact: true }).click();
+  await page.getByText('すべてのアプリを非表示にしています。').waitFor();
+  await hiddenApps.getByText('非表示のアプリ（3）').waitFor();
+  await shot('12-all-hidden');
+
+  await hiddenApps.locator('summary').click();
+  for (const id of ['yuitracking', 'yuivoicechanger', 'yuilivekit']) await hiddenRow(id).getByRole('button', { name: '表示する' }).click();
+  await waitForOrder(['yuilivekit', 'yuivoicechanger', 'yuitracking']);
+  assert.equal(await hiddenApps.isVisible(), false);
+  assert.equal(await page.getByText('すべてのアプリを非表示にしています。').isVisible(), false);
+  await page.getByText('1件のアップデートがあります').waitFor();
+  await handle(tracking).focus();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await waitForOrder(['yuitracking', 'yuilivekit', 'yuivoicechanger']);
+  await handle(voice).focus();
+  await page.keyboard.press('ArrowUp');
+  await waitForOrder(['yuitracking', 'yuivoicechanger', 'yuilivekit']);
+
   await tracking.getByRole('button', { name: 'アップデート' }).click();
   const dialog = page.locator('#close-dialog');
   await dialog.waitFor();

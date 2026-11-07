@@ -31,6 +31,7 @@ pub struct AppView {
     pub can_open: bool,
     pub can_uninstall: bool,
     pub uninstall_note: &'static str,
+    pub hidden: bool,
     pub running: bool,
     pub latest_version: Option<String>,
     pub has_release_page: bool,
@@ -104,6 +105,8 @@ pub struct Service {
     check_done: Condvar,
     // Indexes into apps, in the order the page shows them.
     order: Mutex<Vec<usize>>,
+    // By index into apps. Hidden apps are still checked, just not shown with the others.
+    hidden: Mutex<Vec<bool>>,
     settings_file: Option<PathBuf>,
 }
 
@@ -171,35 +174,53 @@ impl Service {
             store: Mutex::new(Store { entries: apps.iter().map(|_| Entry::default()).collect(), ..Store::default() }),
             check_done: Condvar::new(),
             order: Mutex::new((0..apps.len()).collect()),
+            hidden: Mutex::new(vec![false; apps.len()]),
             settings_file: None,
         }
     }
 
-    /// Keeps the order of the apps in this file. A missing or broken file means the catalog's order.
+    /// Keeps the order of the apps and which are hidden in this file. A missing or broken
+    /// file means the catalog's order with nothing hidden.
     pub fn with_settings(mut self, file: PathBuf) -> Self {
-        let saved: Vec<String> = std::fs::read_to_string(&file)
+        let settings = std::fs::read_to_string(&file)
             .ok()
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .and_then(|settings| serde_json::from_value(settings["order"].clone()).ok())
             .unwrap_or_default();
-        *self.order.get_mut().unwrap() = order_from(self.apps, &saved);
+        let ids = |key: &str| -> Vec<String> { serde_json::from_value(settings[key].clone()).unwrap_or_default() };
+        *self.order.get_mut().unwrap() = order_from(self.apps, &ids("order"));
+        let hidden = ids("hidden");
+        *self.hidden.get_mut().unwrap() = self.apps.iter().map(|app| hidden.iter().any(|id| id == app.id)).collect();
         self.settings_file = Some(file);
         self
     }
 
-    pub fn set_order(&self, ids: &[String]) -> Result<(), String> {
-        let order = order_from(self.apps, ids);
-        *self.order.lock().unwrap() = order.clone();
-        self.changed();
+    fn save_settings(&self) -> Result<(), String> {
         let Some(file) = &self.settings_file else { return Ok(()) };
-        let ids: Vec<&str> = order.iter().map(|index| self.apps[*index].id).collect();
+        let order: Vec<&str> = self.order.lock().unwrap().iter().map(|index| self.apps[*index].id).collect();
+        let hidden: Vec<&str> = {
+            let hidden = self.hidden.lock().unwrap();
+            self.apps.iter().zip(hidden.iter()).filter(|(_, hidden)| **hidden).map(|(app, _)| app.id).collect()
+        };
         let write = || -> std::io::Result<()> {
             if let Some(parent) = file.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(file, serde_json::json!({ "order": ids }).to_string())
+            std::fs::write(file, serde_json::json!({ "order": order, "hidden": hidden }).to_string())
         };
-        write().map_err(|error| format!("並び順を保存できませんでした（{error}）"))
+        write().map_err(|error| format!("設定を保存できませんでした（{error}）"))
+    }
+
+    pub fn set_order(&self, ids: &[String]) -> Result<(), String> {
+        *self.order.lock().unwrap() = order_from(self.apps, ids);
+        self.changed();
+        self.save_settings()
+    }
+
+    pub fn set_hidden(&self, id: &str, hidden: bool) -> Result<(), String> {
+        let index = self.index_of(id)?;
+        self.hidden.lock().unwrap()[index] = hidden;
+        self.changed();
+        self.save_settings()
     }
 
     fn index_of(&self, id: &str) -> Result<usize, String> {
@@ -208,14 +229,16 @@ impl Service {
 
     pub fn snapshot(&self) -> StateView {
         let order = self.order.lock().unwrap().clone();
+        let hidden = self.hidden.lock().unwrap().clone();
         let store = self.store.lock().unwrap();
         StateView {
             checking: store.checking,
             last_checked_at: store.last_checked_at,
             apps: order
                 .iter()
-                .map(|index| (&self.apps[*index], &store.entries[*index]))
-                .map(|(app, entry)| AppView {
+                .map(|index| (&self.apps[*index], &store.entries[*index], hidden[*index]))
+                .map(|(app, entry, hidden)| AppView {
+                    hidden,
                     id: app.id,
                     name: app.name,
                     description: app.description,
@@ -1171,6 +1194,39 @@ mod tests {
         let chosen = ["nope", "yuilivekit", "yuilivekit"].map(str::to_string);
         service.set_order(&chosen).unwrap();
         assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+    }
+
+    fn hidden_ids(service: &Service) -> Vec<&'static str> {
+        service.snapshot().apps.iter().filter(|app| app.hidden).map(|app| app.id).collect()
+    }
+
+    #[test]
+    fn hides_and_shows_apps_and_remembers_it_with_the_order() {
+        let setup = setup(|_| {});
+        let temp = temp_dir();
+        let file = temp.join("settings.json");
+        let service = catalog_service(&setup.fake, &file);
+        assert!(hidden_ids(&service).is_empty(), "nothing is hidden at first");
+        service.set_order(&["yuilivekit".to_string()]).unwrap();
+        service.set_hidden("yuitracking", true).unwrap();
+        service.set_hidden("yuivoicechanger", true).unwrap();
+        service.set_hidden("yuivoicechanger", false).unwrap();
+        assert_eq!(hidden_ids(&service), ["yuitracking"]);
+
+        let restarted = catalog_service(&setup.fake, &file);
+        assert_eq!(hidden_ids(&restarted), ["yuitracking"]);
+        assert_eq!(ids(&restarted), ["yuilivekit", "yuitracking", "yuivoicechanger"], "hiding keeps the order");
+        assert!(setup.service.set_hidden("nope", true).is_err());
+    }
+
+    #[test]
+    fn a_hidden_app_is_still_checked_for_updates() {
+        let setup = setup(|_| {});
+        setup.service.set_hidden("demo", true).unwrap();
+        setup.service.check();
+        let state = setup.state();
+        assert!(state.hidden);
+        assert!(state.update_available);
     }
 
     #[test]

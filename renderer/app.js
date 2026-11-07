@@ -12,6 +12,10 @@ const PHASES = {
 
 const elements = {
   apps: document.getElementById('apps'),
+  allHidden: document.getElementById('all-hidden'),
+  hiddenApps: document.getElementById('hidden-apps'),
+  hiddenSummary: document.getElementById('hidden-summary'),
+  hiddenList: document.getElementById('hidden-list'),
   summary: document.getElementById('summary'),
   check: document.getElementById('check'),
   selfUpdate: document.getElementById('self-update'),
@@ -36,7 +40,11 @@ const GRIP = '<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor
   + '<circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/>'
   + '<circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/></svg>';
 
+let lastState = null;
+
 const shownIds = () => [...elements.apps.children].map(card => card.dataset.app);
+// Hidden apps keep their place after the shown ones, so showing one again puts it at the end.
+const withHidden = ids => [...ids, ...(lastState ? lastState.apps.filter(app => app.hidden).map(app => app.id) : [])];
 
 // Cards are rebuilt on every state change; reusing the image keeps it from flickering.
 function iconFor(app) {
@@ -95,7 +103,7 @@ function endDrag() {
   const waiting = pendingState;
   pendingState = null;
   // A new order comes back as a state change, so the old one waiting here would flash.
-  if (after.join() !== before.join()) window.launcher.setOrder(after);
+  if (after.join() !== before.join()) window.launcher.setOrder(withHidden(after));
   else if (waiting) render(waiting);
 }
 
@@ -122,7 +130,7 @@ function moveByKey(event, app) {
   const to = from + step;
   if (to < 0 || to >= ids.length) return;
   [ids[from], ids[to]] = [ids[to], ids[from]];
-  window.launcher.setOrder(ids);
+  window.launcher.setOrder(withHidden(ids));
 }
 
 function handleFor(app) {
@@ -186,6 +194,12 @@ function versionLine(app) {
     link.addEventListener('click', () => window.launcher.openReleasePage(app.id));
     line.append(link);
   }
+  line.append(' ・ ');
+  const hide = el('button', 'link', '非表示');
+  hide.dataset.key = `${app.id}:hide`;
+  hide.disabled = Boolean(app.task);
+  hide.addEventListener('click', () => window.launcher.setHidden(app.id, true));
+  line.append(hide);
   // Kept on the left, away from the main buttons, so it can't be hit by mistake.
   if (app.canUninstall) {
     line.append(' ・ ');
@@ -245,9 +259,22 @@ function card(app) {
   return node;
 }
 
+function hiddenRow(app) {
+  const row = el('li', 'hidden-row');
+  row.dataset.app = app.id;
+  const icon = el('img', 'icon small');
+  icon.src = app.icon;
+  icon.alt = '';
+  row.append(icon, el('span', 'hidden-name', app.name));
+  if (app.installed && app.updateAvailable) row.append(el('span', 'hidden-note', 'アップデートあり'));
+  row.append(button('表示する', `${app.id}:show`, () => window.launcher.setHidden(app.id, false)));
+  return row;
+}
+
 function summaryText(state) {
   if (state.checking) return '更新を確認しています…';
-  const count = state.apps.filter(app => app.installed && app.updateAvailable).length;
+  // Hidden apps are ones the person doesn't use, so their updates aren't counted.
+  const count = state.apps.filter(app => !app.hidden && app.installed && app.updateAvailable).length;
   const checkedAt = state.lastCheckedAt
     ? `最終確認 ${new Date(state.lastCheckedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}`
     : '';
@@ -275,13 +302,20 @@ function render(state) {
     pendingState = state;
     return;
   }
+  lastState = state;
   elements.selfUpdateInstall.disabled = state.apps.some(app => app.task);
   const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
-  elements.apps.replaceChildren(...state.apps.map(card));
+  const shown = state.apps.filter(app => !app.hidden);
+  const hidden = state.apps.filter(app => app.hidden);
+  elements.apps.replaceChildren(...shown.map(card));
+  elements.hiddenList.replaceChildren(...hidden.map(hiddenRow));
+  elements.hiddenSummary.textContent = `非表示のアプリ（${hidden.length}）`;
+  elements.hiddenApps.hidden = hidden.length === 0;
+  elements.allHidden.hidden = shown.length > 0;
   elements.summary.textContent = summaryText(state);
   elements.check.disabled = state.checking;
   if (focusKey) {
-    const target = elements.apps.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
+    const target = document.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
     if (target) target.focus();
   }
 }

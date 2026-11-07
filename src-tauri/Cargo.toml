@@ -1,6 +1,6 @@
 [package]
 name = "yui-launcher"
-version = "2026.1107.11"
+version = "2026.1107.12"
 description = "Launch and update Yui apps"
 authors = ["suzunayui"]
 edition = "2021"

@@ -101,6 +101,11 @@ fn set_order(service: State<'_, Arc<Service>>, ids: Vec<String>) -> Result<(), S
 }
 
 #[tauri::command]
+fn set_hidden(service: State<'_, Arc<Service>>, id: String, hidden: bool) -> Result<(), String> {
+    service.set_hidden(&id, hidden)
+}
+
+#[tauri::command]
 fn open_release_page(service: State<'_, Arc<Service>>, id: String) -> Result<(), String> {
     match service.release_page_url(&id)? {
         Some(url) => service.open_url(&url),
@@ -282,6 +287,7 @@ macro_rules! handlers {
             uninstall,
             cancel,
             set_order,
+            set_hidden,
             open_release_page,
             open_support_page,
             get_self_update,

@@ -13,6 +13,7 @@
     uninstall: (id, closeRunning) => invoke('uninstall', { id, closeRunning: closeRunning === true }),
     cancel: id => invoke('cancel', { id }),
     setOrder: ids => invoke('set_order', { ids }),
+    setHidden: (id, hidden) => invoke('set_hidden', { id, hidden }),
     openReleasePage: id => invoke('open_release_page', { id }),
     openSupportPage: () => invoke('open_support_page'),
     getSelfUpdate: () => invoke('get_self_update'),

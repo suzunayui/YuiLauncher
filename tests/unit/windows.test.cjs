@@ -74,3 +74,20 @@ test('falls back to the uninstaller folder when InstallLocation is empty', () =>
 test('returns null when neither value is usable', () => {
   assert.equal(installDirFrom({}), null);
 });
+
+// The values Tauri's NSIS installer really writes.
+const tauriEntry = {
+  InstallLocation: '"C:\\Users\\a b\\AppData\\Local\\YuiVoiceChanger"',
+  UninstallString: '"C:\\Users\\a b\\AppData\\Local\\YuiVoiceChanger\\uninstall.exe"',
+};
+
+test('removes the quotes Tauri puts around InstallLocation', () => {
+  assert.equal(installDirFrom(tauriEntry), 'C:\\Users\\a b\\AppData\\Local\\YuiVoiceChanger');
+});
+
+test('accepts the uninstaller of a Tauri install', () => {
+  assert.deepEqual(uninstallerFrom(tauriEntry, { uninstallArgs: ['/S'] }, exists), {
+    file: 'C:\\Users\\a b\\AppData\\Local\\YuiVoiceChanger\\uninstall.exe',
+    args: ['/S'],
+  });
+});

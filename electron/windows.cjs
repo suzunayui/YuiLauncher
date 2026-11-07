@@ -36,9 +36,10 @@ async function powershell(script) {
 const psQuote = value => `'${String(value).replace(/'/g, "''")}'`;
 
 // electron-builder's NSIS installer leaves InstallLocation empty, so fall back
-// to the folder of the uninstaller.
+// to the folder of the uninstaller. Tauri's writes it with quotes around it.
 function installDirFrom({ InstallLocation, UninstallString }) {
-  if (InstallLocation) return InstallLocation;
+  const location = (InstallLocation || '').trim().replace(/^"(.*)"$/, '$1');
+  if (location) return location;
   const match = /^"([^"]+)"/.exec(UninstallString || '');
   return match ? path.dirname(match[1]) : null;
 }

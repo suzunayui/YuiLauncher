@@ -3,6 +3,8 @@
 // Drives the real Electron window against tests/fixture.cjs and saves
 // screenshots to the folder given in YUI_LAUNCHER_SHOTS, if any.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('@playwright/test');
 
@@ -11,7 +13,9 @@ const shots = process.env.YUI_LAUNCHER_SHOTS;
 async function main() {
   const env = { ...process.env, YUI_LAUNCHER_FIXTURE: path.join(__dirname, 'fixture.cjs') };
   delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({ args: [path.join(__dirname, '..')], env });
+  // A separate profile keeps an installed, running launcher from blocking this one.
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-launcher-test-'));
+  const app = await electron.launch({ args: [`--user-data-dir=${profile}`, path.join(__dirname, '..')], env });
   const shot = async (page, name) => {
     if (shots) await page.screenshot({ path: path.join(shots, `${name}.png`) });
   };
@@ -58,10 +62,41 @@ async function main() {
     assert.ok(await tracking.getByText('起動中').isVisible(), 'closed app is started again');
     await shot(page, '4-updated');
 
+    const liveKit = page.locator('[data-app="yuilivekit"]');
+    const confirm = dialog.getByRole('button', { name: 'アンインストール' });
+    await liveKit.getByRole('button', { name: 'アンインストール' }).click();
+    await dialog.getByText('YuiLiveKitをアンインストールしますか？').waitFor();
+    assert.ok(await dialog.getByText(/コメント、設定/).isVisible(), 'says which data stays');
+    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'やめる', 'the safe choice has focus');
+    await shot(page, '5-confirm-uninstall');
+    await dialog.getByRole('button', { name: 'やめる' }).click();
+    assert.ok(await liveKit.getByText('最新です').isVisible(), 'cancel keeps the app');
+
+    await liveKit.getByRole('button', { name: 'アンインストール' }).click();
+    await confirm.click();
+    await liveKit.getByText('YuiLiveKitをアンインストールしました。').waitFor({ timeout: 15000 });
+    assert.ok(await liveKit.getByText(/未インストール/).isVisible());
+    assert.equal(await liveKit.getByRole('button', { name: '開く' }).count(), 0);
+    assert.equal(await liveKit.getByRole('button', { name: 'アンインストール' }).count(), 0);
+    assert.ok(await liveKit.getByRole('button', { name: 'インストール' }).isVisible(), 'can install again');
+    await shot(page, '6-uninstalled');
+
+    await tracking.getByRole('button', { name: 'アンインストール' }).click();
+    await dialog.getByText('YuiTrackingをアンインストールしますか？').waitFor();
+    await confirm.click();
+    await tracking.getByText('YuiTrackingをアンインストールしました。').waitFor({ timeout: 15000 });
+    assert.equal(await tracking.getByText('起動中').count(), 0, 'a running app is closed and not started again');
+
+    await liveKit.getByRole('button', { name: 'インストール' }).click();
+    await liveKit.getByText('2026.1107.1をインストールしました。').waitFor({ timeout: 15000 });
+    await tracking.getByRole('button', { name: 'インストール' }).click();
+    await tracking.getByText('2026.1107.1をインストールしました。').waitFor({ timeout: 15000 });
+
     assert.deepEqual(errors, []);
     console.log('UI test passed');
   } finally {
     await app.close();
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 

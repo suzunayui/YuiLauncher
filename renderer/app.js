@@ -6,6 +6,8 @@ const PHASES = {
   closing: 'アプリを閉じています',
   installing: 'インストール中',
   confirming: 'インストールを確認中',
+  uninstalling: 'アンインストール中',
+  removing: 'アンインストールを確認中',
 };
 
 const elements = {
@@ -22,7 +24,7 @@ const elements = {
   dialogConfirm: document.getElementById('close-confirm'),
 };
 
-let pendingClose = null;
+let pendingConfirm = null;
 const icons = new Map();
 
 // Cards are rebuilt on every state change; reusing the image keeps it from flickering.
@@ -51,14 +53,35 @@ function button(label, key, onClick, { primary = false, disabled = false } = {})
   return node;
 }
 
+function confirmAction({ title, body, confirmLabel, danger = false, onConfirm }) {
+  pendingConfirm = onConfirm;
+  elements.dialogTitle.textContent = title;
+  elements.dialogBody.textContent = body;
+  elements.dialogConfirm.textContent = confirmLabel;
+  elements.dialogConfirm.classList.toggle('danger', danger);
+  elements.dialog.showModal();
+}
+
 async function startInstall(app, closeRunning = false) {
   const result = await window.launcher.install(app.id, closeRunning);
   if (result && result.status === 'needs-close') {
-    pendingClose = app;
-    elements.dialogTitle.textContent = `${app.name}を閉じて更新しますか？`;
-    elements.dialogBody.textContent = 'ダウンロードと検証が終わると、アプリを閉じて更新し、自動で起動し直します。配信や作業の途中なら、終わってから更新してください。';
-    elements.dialog.showModal();
+    confirmAction({
+      title: `${app.name}を閉じて更新しますか？`,
+      body: 'ダウンロードと検証が終わると、アプリを閉じて更新し、自動で起動し直します。配信や作業の途中なら、終わってから更新してください。',
+      confirmLabel: '閉じて更新',
+      onConfirm: () => startInstall(app, true),
+    });
   }
+}
+
+function startUninstall(app) {
+  confirmAction({
+    title: `${app.name}をアンインストールしますか？`,
+    body: `${app.uninstallNote} 起動中の場合は、アプリを閉じてからアンインストールします。`,
+    confirmLabel: 'アンインストール',
+    danger: true,
+    onConfirm: () => window.launcher.uninstall(app.id, true),
+  });
 }
 
 function versionLine(app) {
@@ -119,6 +142,11 @@ function card(app) {
     const primary = !app.updateAvailable;
     actions.append(button('開く', `${app.id}:open`, () => window.launcher.open(app.id), { primary, disabled: busy || !app.canOpen }));
   }
+  if (app.canUninstall) {
+    const remove = button('アンインストール', `${app.id}:uninstall`, () => startUninstall(app), { disabled: busy });
+    remove.classList.add('danger');
+    actions.append(remove);
+  }
   main.append(iconFor(app), info, actions);
   node.append(main);
 
@@ -152,14 +180,14 @@ function render(state) {
 
 elements.check.addEventListener('click', () => window.launcher.check());
 elements.dialogCancel.addEventListener('click', () => {
-  pendingClose = null;
+  pendingConfirm = null;
   elements.dialog.close();
 });
 elements.dialogConfirm.addEventListener('click', () => {
-  const app = pendingClose;
-  pendingClose = null;
+  const onConfirm = pendingConfirm;
+  pendingConfirm = null;
   elements.dialog.close();
-  if (app) startInstall(app, true);
+  if (onConfirm) onConfirm();
 });
 elements.selfUpdateInstall.addEventListener('click', () => window.launcher.installSelfUpdate());
 

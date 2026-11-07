@@ -22,7 +22,17 @@ function create() {
   return {
     catalog,
     system: {
-      readInstalled: async app => ({ version: world[app.id].version, exePath: `C:\\Fake\\${app.exeName}` }),
+      readInstalled: async app => (world[app.id].version
+        ? {
+          version: world[app.id].version,
+          exePath: `C:\\Fake\\${app.exeName}`,
+          uninstaller: { file: 'C:\\Fake\\unins.exe', args: [app.id] },
+        }
+        : null),
+      runUninstaller: async ({ args }) => {
+        await sleep(200);
+        world[args[0]].version = null;
+      },
       isRunning: async app => world[app.id].running,
       closeApp: async app => {
         await sleep(100);
@@ -50,7 +60,7 @@ function create() {
         },
         checksums: { name: 'SHA256SUMS.txt', url: 'https://example.invalid/sums' },
       }),
-      fetchText: async () => `${HASH}  YuiTracking-Setup-2026.1107.1-x64.exe\n`,
+      fetchText: async () => Object.values(installerNames).map(name => `${HASH}  ${name}`).join('\n'),
     },
     downloader: {
       download: async ({ dest, onProgress }) => {

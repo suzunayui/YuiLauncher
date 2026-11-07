@@ -112,6 +112,16 @@ h1 {
   filter: brightness(1.08);
 }
 
+.button.danger {
+  color: var(--danger);
+}
+
+.button.primary.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--surface);
+}
+
 .self-update {
   display: flex;
   align-items: center;

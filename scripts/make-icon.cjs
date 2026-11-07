@@ -3,6 +3,7 @@
 // Writes assets/icon.ico and assets/icon.png from assets/icon-source.webp.
 // Pass a folder to also save each size as a PNG for checking.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { _electron: electron } = require('@playwright/test');
 
@@ -47,7 +48,9 @@ async function main() {
   const previewDir = process.argv[2];
   const env = { ...process.env, YUI_LAUNCHER_FIXTURE: path.join(root, 'tests', 'fixture.cjs') };
   delete env.ELECTRON_RUN_AS_NODE;
-  const app = await electron.launch({ args: [root], env });
+  // A separate profile keeps an installed, running launcher from blocking this one.
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'yui-launcher-icon-'));
+  const app = await electron.launch({ args: [`--user-data-dir=${profile}`, root], env });
   let result;
   try {
     await app.firstWindow();
@@ -61,6 +64,7 @@ async function main() {
     }, { source, sizes: SIZES, render: RENDER });
   } finally {
     await app.close();
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 
   console.log(`Source ${result.width}x${result.height}, corner alpha ${result.cornerAlpha}`);

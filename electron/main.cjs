@@ -41,6 +41,7 @@ function registerIpc() {
   handle('state:check', () => service.check());
   handle('app:open', id => service.open(id));
   handle('app:install', (id, closeRunning) => service.install(id, { closeRunning: closeRunning === true }));
+  handle('app:uninstall', (id, closeRunning) => service.uninstall(id, { closeRunning: closeRunning === true }));
   handle('app:cancel', id => service.cancel(id));
   handle('app:release-page', id => {
     const url = service.releasePageUrl(id);
@@ -79,7 +80,7 @@ function createWindow() {
     dialog.showMessageBox(window, {
       type: 'info',
       title: 'YuiLauncher',
-      message: '更新が終わるまでお待ちください。',
+      message: '処理が終わるまでお待ちください。',
       detail: 'ダウンロード中であれば、キャンセルしてから閉じられます。',
     });
   });

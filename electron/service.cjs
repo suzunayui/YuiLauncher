@@ -22,6 +22,7 @@ function createService({
     installed: false,
     version: null,
     exePath: null,
+    uninstaller: null,
     running: false,
     release: null,
     checkError: null,
@@ -60,6 +61,8 @@ function createService({
         installed: entry.installed,
         version: entry.version,
         canOpen: Boolean(entry.exePath),
+        canUninstall: Boolean(entry.uninstaller),
+        uninstallNote: entry.app.uninstallNote,
         running: entry.running,
         latestVersion: entry.release ? entry.release.version : null,
         hasReleasePage: Boolean(entry.release && entry.release.pageUrl),
@@ -79,6 +82,7 @@ function createService({
     entry.installed = Boolean(installed);
     entry.version = installed ? installed.version : null;
     entry.exePath = installed ? installed.exePath : null;
+    entry.uninstaller = installed ? installed.uninstaller : null;
   }
 
   async function refreshLocal() {
@@ -86,7 +90,7 @@ function createService({
       if (entry.task) return;
       try {
         await readLocal(entry);
-        entry.running = await system.isRunning(entry.app);
+        entry.running = await system.isRunning(entry.app, entry.exePath);
       } catch (error) {
         console.error(`Failed to read ${entry.app.id}`, error);
       }
@@ -99,7 +103,7 @@ function createService({
     await Promise.all([...entries.values()].map(async entry => {
       if (entry.task) return;
       try {
-        const running = await system.isRunning(entry.app);
+        const running = await system.isRunning(entry.app, entry.exePath);
         if (running !== entry.running) {
           entry.running = running;
           dirty = true;
@@ -191,7 +195,7 @@ function createService({
 
     entry.error = null;
     entry.notice = null;
-    entry.running = await system.isRunning(entry.app);
+    entry.running = await system.isRunning(entry.app, entry.exePath);
     if (entry.running && !closeRunning) {
       changed();
       return { status: 'needs-close' };
@@ -203,10 +207,10 @@ function createService({
       workDir = await fs.promises.mkdtemp(path.join(tempRoot, 'update-'));
       const installer = await verifiedInstaller(entry, release, workDir);
 
-      if (await system.isRunning(entry.app)) {
+      if (await system.isRunning(entry.app, entry.exePath)) {
         if (!closeRunning) throw new UserError(`${entry.app.name}が起動されたため中止しました。もう一度お試しください。`);
         setTask(entry, 'closing');
-        if (!(await system.closeApp(entry.app))) {
+        if (!(await system.closeApp(entry.app, entry.exePath))) {
           throw new UserError(`${entry.app.name}を閉じられませんでした。アプリ側で閉じてから、もう一度お試しください。`);
         }
         closedApp = true;
@@ -230,7 +234,61 @@ function createService({
       entry.task = null;
       if (workDir) await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
       await readLocal(entry).catch(() => {});
-      entry.running = await system.isRunning(entry.app).catch(() => entry.running);
+      entry.running = await system.isRunning(entry.app, entry.exePath).catch(() => entry.running);
+      changed();
+    }
+  }
+
+  async function waitForRemoval(entry) {
+    const deadline = Date.now() + confirmTimeoutMs;
+    for (;;) {
+      await readLocal(entry);
+      if (!entry.installed) return;
+      if (Date.now() >= deadline) throw new UserError('アンインストールの完了を確認できませんでした。');
+      await new Promise(resolve => setTimeout(resolve, confirmIntervalMs));
+    }
+  }
+
+  async function uninstall(id, { closeRunning = false } = {}) {
+    const entry = entryFor(id);
+    if (entry.task) return { status: 'busy' };
+
+    entry.error = null;
+    entry.notice = null;
+    entry.running = await system.isRunning(entry.app, entry.exePath);
+    if (entry.running && !closeRunning) {
+      changed();
+      return { status: 'needs-close' };
+    }
+
+    let closedApp = false;
+    try {
+      await readLocal(entry);
+      if (!entry.uninstaller) throw new UserError('アンインストーラーが見つかりません。');
+      const { uninstaller } = entry;
+
+      if (entry.running) {
+        setTask(entry, 'closing');
+        if (!(await system.closeApp(entry.app, entry.exePath))) {
+          throw new UserError(`${entry.app.name}を閉じられませんでした。アプリ側で閉じてから、もう一度お試しください。`);
+        }
+        closedApp = true;
+      }
+
+      setTask(entry, 'uninstalling');
+      await system.runUninstaller(uninstaller);
+      setTask(entry, 'removing');
+      await waitForRemoval(entry);
+      entry.notice = `${entry.app.name}をアンインストールしました。`;
+      return { status: 'done' };
+    } catch (error) {
+      entry.error = error instanceof UserError ? error.message : `アンインストールに失敗しました（${error.message}）`;
+      await relaunchIfClosed(entry, closedApp);
+      return { status: 'failed' };
+    } finally {
+      entry.task = null;
+      await readLocal(entry).catch(() => {});
+      entry.running = await system.isRunning(entry.app, entry.exePath).catch(() => entry.running);
       changed();
     }
   }
@@ -272,7 +330,7 @@ function createService({
 
   const isBusy = () => [...entries.values()].some(entry => entry.task);
 
-  return { snapshot, check, refreshLocal, refreshRunning, install, cancel, open, releasePageUrl, isBusy };
+  return { snapshot, check, refreshLocal, refreshRunning, install, uninstall, cancel, open, releasePageUrl, isBusy };
 }
 
 module.exports = { createService, UserError };

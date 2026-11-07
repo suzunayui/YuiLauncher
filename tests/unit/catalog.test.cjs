@@ -29,6 +29,13 @@ test('catalog ids and installed executables are unique', () => {
   assert.equal(new Set(catalog.map(app => app.exeName)).size, catalog.length);
 });
 
+test('every app defines how to uninstall silently and what stays', () => {
+  for (const app of catalog) {
+    assert.ok(app.uninstallArgs.length > 0, app.id);
+    assert.ok(app.uninstallNote, app.id);
+  }
+});
+
 test('YuiLiveKit uses its release and skips those from its former name', () => {
   const picked = pickLatestRelease([
     release('YouTubeOverlay-2026.10.10-18', ['YouTubeOverlay-2026.10.10-18.exe']),

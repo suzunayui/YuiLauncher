@@ -13,6 +13,8 @@ module.exports = [
     installerPattern: /^YuiTracking-Setup-[\d.]+-x64\.exe$/,
     checksumPattern: /^SHA256SUMS.*\.txt$/,
     silentArgs: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
+    uninstallArgs: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
+    uninstallNote: '設定、VRMの履歴、ログは残ります。仮想カメラの登録は削除されます。',
     icon: '../assets/apps/YuiTracking.ico',
   },
   {
@@ -25,6 +27,8 @@ module.exports = [
     installerPattern: /^YuiVoiceChanger-Setup-[\d.]+\.exe$/,
     checksumPattern: /^SHA256SUMS.*\.txt$/,
     silentArgs: ['/S'],
+    uninstallArgs: ['/S'],
+    uninstallNote: '設定とPython環境（ホームの.YuiVoiceChanger）、音声モデル、OBSプラグインは残ります。',
     icon: '../assets/apps/YuiVoiceChanger.ico',
   },
   {
@@ -37,6 +41,8 @@ module.exports = [
     installerPattern: /^YuiLiveKit-Setup-[\d.]+\.exe$/,
     checksumPattern: /^SHA256SUMS.*\.txt$/,
     silentArgs: ['/S'],
+    uninstallArgs: ['/S'],
+    uninstallNote: 'コメント、設定、字幕用のモデルなどのデータは残ります。',
     icon: '../assets/apps/YuiLiveKit.ico',
   },
 ];

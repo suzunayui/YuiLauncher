@@ -23,7 +23,13 @@ function setup({ version = '1.0.0', running = false, latest = '1.1.0', overrides
   const world = { version, running };
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'yl-service-'));
   const system = {
-    readInstalled: async () => (world.version ? { version: world.version, exePath: 'C:\\Demo\\Demo.exe' } : null),
+    readInstalled: async () => (world.version
+      ? { version: world.version, exePath: 'C:\\Demo\\Demo.exe', uninstaller: { file: 'C:\\Demo\\unins.exe', args: ['/S'] } }
+      : null),
+    runUninstaller: async ({ file, args }) => {
+      log.push(`uninstall:${path.win32.basename(file)}:${args.join(' ')}`);
+      world.version = null;
+    },
     isRunning: async () => world.running,
     closeApp: async () => {
       log.push('close');
@@ -258,8 +264,128 @@ test('never exposes download URLs or local paths to the page', async () => {
   const { service } = setup();
   await service.check();
   const serialized = JSON.stringify(service.snapshot());
-  assert.equal(serialized.includes('installer'), false);
+  assert.equal(serialized.includes('https://github.com/owner/Demo/installer'), false);
   assert.equal(serialized.includes('Demo.exe'), false);
+  assert.equal(serialized.includes('unins.exe'), false);
+});
+
+test('checks and closes the app by its installed path', async () => {
+  const paths = [];
+  const context = setup({
+    running: true,
+    overrides: {
+      system: {
+        isRunning: async (_app, exePath) => {
+          paths.push(exePath);
+          return context.world.running;
+        },
+        closeApp: async (_app, exePath) => {
+          paths.push(exePath);
+          context.world.running = false;
+          return true;
+        },
+      },
+    },
+  });
+  await context.service.check();
+  await context.service.uninstall('demo', { closeRunning: true });
+  assert.ok(paths.includes('C:\\Demo\\Demo.exe'));
+  assert.equal(context.appState().running, false, 'nothing is running once the app is gone');
+});
+
+test('uninstalls a closed app without starting anything', async () => {
+  const { service, log, appState } = setup({ latest: '1.0.0' });
+  await service.check();
+  assert.equal(appState().canUninstall, true);
+  assert.equal((await service.uninstall('demo')).status, 'done');
+  assert.deepEqual(log, ['uninstall:unins.exe:/S']);
+  assert.equal(appState().installed, false);
+  assert.equal(appState().canUninstall, false);
+  assert.equal(appState().task, null);
+  assert.equal(appState().updateAvailable, true, 'it can be installed again');
+  assert.match(appState().notice, /アンインストールしました/);
+});
+
+test('does not touch a running app without confirmation', async () => {
+  const { service, log, appState } = setup({ running: true });
+  await service.check();
+  assert.equal((await service.uninstall('demo')).status, 'needs-close');
+  assert.deepEqual(log, []);
+  assert.equal(appState().installed, true);
+});
+
+test('closes a running app first and does not start it again', async () => {
+  const { service, log, appState } = setup({ running: true });
+  await service.check();
+  assert.equal((await service.uninstall('demo', { closeRunning: true })).status, 'done');
+  assert.deepEqual(log, ['close', 'uninstall:unins.exe:/S']);
+  assert.equal(appState().running, false);
+});
+
+test('stops the uninstall when the app will not close', async () => {
+  const { service, log, appState } = setup({
+    running: true,
+    overrides: { system: { closeApp: async () => false } },
+  });
+  await service.check();
+  assert.equal((await service.uninstall('demo', { closeRunning: true })).status, 'failed');
+  assert.deepEqual(log, []);
+  assert.match(appState().error, /閉じられませんでした/);
+  assert.equal(appState().installed, true);
+});
+
+test('starts the app again when the uninstaller fails', async () => {
+  const { service, log, appState } = setup({
+    running: true,
+    overrides: { system: { runUninstaller: async () => { throw new Error('アンインストーラーが終了コード2で終了しました'); } } },
+  });
+  await service.check();
+  assert.equal((await service.uninstall('demo', { closeRunning: true })).status, 'failed');
+  assert.deepEqual(log, ['close', 'launch']);
+  assert.match(appState().error, /終了コード2/);
+  assert.equal(appState().installed, true);
+});
+
+test('reports failure when the app is still registered afterwards', async () => {
+  const { service, appState } = setup({
+    overrides: { system: { runUninstaller: async () => {} } },
+  });
+  await service.check();
+  assert.equal((await service.uninstall('demo')).status, 'failed');
+  assert.match(appState().error, /確認できませんでした/);
+  assert.equal(appState().installed, true);
+});
+
+test('fails clearly when no uninstaller is available', async () => {
+  const { service, log, appState } = setup({
+    overrides: { system: { readInstalled: async () => ({ version: '1.0.0', exePath: null, uninstaller: null }) } },
+  });
+  await service.check();
+  assert.equal(appState().canUninstall, false);
+  assert.equal((await service.uninstall('demo')).status, 'failed');
+  assert.deepEqual(log, []);
+  assert.match(appState().error, /見つかりません/);
+});
+
+test('refuses to uninstall while an update is running', async () => {
+  let release;
+  const { service } = setup({
+    overrides: {
+      downloader: {
+        download: async ({ dest }) => {
+          fs.writeFileSync(dest, 'x');
+          await new Promise(resolve => { release = resolve; });
+          return { sha256: HASH };
+        },
+      },
+    },
+  });
+  await service.check();
+  const update = service.install('demo');
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await service.uninstall('demo')).status, 'busy');
+  release();
+  assert.equal((await update).status, 'done');
 });
 
 test('only returns release pages from the app repository', async () => {

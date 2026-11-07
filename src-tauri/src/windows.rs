@@ -19,28 +19,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 use winreg::RegKey;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct UninstallCommand {
-    pub file: PathBuf,
-    pub args: Vec<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Installed {
-    pub version: Option<String>,
-    pub exe_path: Option<PathBuf>,
-    pub uninstaller: Option<UninstallCommand>,
-}
-
-pub trait System: Send + Sync {
-    fn read_installed(&self, app: &AppDef) -> Result<Option<Installed>, String>;
-    fn is_running(&self, app: &AppDef, exe_path: Option<&Path>) -> Result<bool, String>;
-    fn close_app(&self, app: &AppDef, exe_path: &Path) -> Result<bool, String>;
-    fn launch(&self, exe_path: &Path) -> Result<(), String>;
-    fn run_installer(&self, file: &Path, args: &[&str]) -> Result<(), String>;
-    fn run_uninstaller(&self, command: &UninstallCommand) -> Result<(), String>;
-    fn open_url(&self, url: &str) -> Result<(), String>;
-}
+pub use crate::system::{Installed, System, UninstallCommand};
 
 /// electron-builder's NSIS installer leaves InstallLocation empty, so this falls back
 /// to the folder of the uninstaller. Tauri's writes it with quotes around it.
@@ -201,7 +180,7 @@ impl System for RealSystem {
         Command::new(exe_path).current_dir(dir).spawn().map(|_| ()).map_err(|error| error.to_string())
     }
 
-    fn run_installer(&self, file: &Path, args: &[&str]) -> Result<(), String> {
+    fn run_installer(&self, _app: &AppDef, file: &Path, args: &[&str]) -> Result<(), String> {
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
         run_to_exit(file, &args, "インストーラー")
     }

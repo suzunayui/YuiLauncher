@@ -1,4 +1,4 @@
-// YuiLauncher: starts, updates and removes the Yui apps on Windows.
+// YuiLauncher: starts, updates and removes the Yui apps on Windows and macOS.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod catalog;
@@ -8,12 +8,16 @@ mod fixture;
 mod releases;
 mod self_update;
 mod service;
+mod system;
 #[cfg(test)]
 mod testutil;
 mod version;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(windows)]
 mod windows;
 
-use catalog::APPS;
+use catalog::platform_apps;
 use download::{Downloader, HttpDownloader};
 use releases::{GitHub, Releases};
 use self_update::{SelfUpdater, SelfView, Updater};
@@ -27,7 +31,7 @@ use std::time::Duration;
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-use windows::{RealSystem, System};
+use system::System;
 
 const SUPPORT_URL: &str = "https://suzunayui.fanbox.cc/";
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -152,9 +156,41 @@ fn is_fixture() -> bool {
     false
 }
 
-/// Starts the installer on its own, so it carries on after the launcher quits.
-fn start_detached(file: &Path, args: &[&str]) -> Result<(), String> {
+/// Starts the installer on its own, so it carries on after the launcher quits. /R makes it
+/// start the new version, and /UPDATE keeps it from bringing back a removed desktop shortcut.
+#[cfg(windows)]
+fn start_detached(file: &Path, restart: bool) -> Result<(), String> {
+    let args: &[&str] = if restart { &["/S", "/UPDATE", "/R"] } else { &["/S", "/UPDATE"] };
     Command::new(file).args(args).spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// Swaps the running bundle for the new one: macOS keeps the old one open until it quits.
+/// To restart, a shell waits for this process to end and then opens the new bundle.
+#[cfg(target_os = "macos")]
+fn start_detached(file: &Path, restart: bool) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let bundle = exe.ancestors().nth(3).filter(|path| path.extension().is_some_and(|extension| extension == "app"));
+    let bundle = bundle.ok_or("YuiLauncher.app から起動していません")?.to_path_buf();
+    macos::install_from(file, "YuiLauncher.app", &bundle)?;
+    if restart {
+        let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"";
+        Command::new("sh")
+            .args(["-c", script, "sh", &std::process::id().to_string()])
+            .arg(&bundle)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn real_system() -> Arc<dyn System> {
+    Arc::new(windows::RealSystem)
+}
+
+#[cfg(target_os = "macos")]
+fn real_system() -> Arc<dyn System> {
+    Arc::new(macos::MacSystem::new())
 }
 
 struct Backend {
@@ -165,7 +201,7 @@ struct Backend {
 
 fn real_backend() -> Backend {
     let releases = GitHub::new().expect("failed to set up TLS");
-    Backend { system: Arc::new(RealSystem), releases: Arc::new(releases), downloader: Arc::new(HttpDownloader) }
+    Backend { system: real_system(), releases: Arc::new(releases), downloader: Arc::new(HttpDownloader) }
 }
 
 fn set_up(app: &AppHandle) -> tauri::Result<()> {
@@ -182,7 +218,7 @@ fn set_up(app: &AppHandle) -> tauri::Result<()> {
 
     let handle = app.clone();
     let apps_service = Service::new(
-        &APPS,
+        platform_apps(),
         backend.system.clone(),
         backend.releases.clone(),
         backend.downloader.clone(),

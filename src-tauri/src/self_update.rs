@@ -3,7 +3,7 @@
 
 use crate::catalog::LAUNCHER;
 use crate::download::Downloader;
-use crate::releases::{parse_checksums, Release, Releases};
+use crate::releases::{expected_checksum, Release, Releases};
 use crate::version::compare_versions;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -26,8 +26,9 @@ pub struct SelfView {
     pub error: Option<String>,
 }
 
-/// Starts an installer without waiting for it.
-pub type RunInstaller = Box<dyn Fn(&Path, &[&str]) -> Result<(), String> + Send + Sync>;
+/// Puts the downloaded update in place without waiting for it to finish. When the bool is
+/// true, the new version starts once the launcher has quit.
+pub type RunInstaller = Box<dyn Fn(&Path, bool) -> Result<(), String> + Send + Sync>;
 pub type OnChange = Box<dyn Fn(SelfView) + Send + Sync>;
 
 pub struct Updater {
@@ -161,9 +162,8 @@ impl SelfUpdater {
                 }
             })
             .map_err(|error| format!("{error:?}"))?;
-        let text = updater.releases.fetch_text(&release.checksums.url)?;
-        match parse_checksums(&text).get(&release.installer.name) {
-            Some(expected) if *expected == sha256 => Ok(dest),
+        match expected_checksum(updater.releases.as_ref(), release)? {
+            Some(expected) if expected == sha256 => Ok(dest),
             Some(_) => Err(format!("checksum mismatch for {}", release.installer.name)),
             None => Err(format!("no checksum for {}", release.installer.name)),
         }
@@ -216,7 +216,7 @@ impl SelfUpdater {
         }
     }
 
-    fn start_installer(&self, args: &[&str]) -> bool {
+    fn start_installer(&self, restart: bool) -> bool {
         let Some(updater) = &self.updater else { return false };
         let installer = {
             let mut state = self.state.lock().unwrap();
@@ -226,7 +226,7 @@ impl SelfUpdater {
             state.installer.take()
         };
         let Some(installer) = installer else { return false };
-        match (updater.run_installer)(&installer, args) {
+        match (updater.run_installer)(&installer, restart) {
             Ok(()) => true,
             Err(error) => {
                 self.log("ERROR", &format!("Could not start the installer: {error}"));
@@ -236,14 +236,14 @@ impl SelfUpdater {
         }
     }
 
-    /// For the restart button. /R makes the installer start the new version. True means quit now.
+    /// For the restart button. True means quit now.
     pub fn install(&self) -> bool {
-        self.start_installer(&["/S", "/UPDATE", "/R"])
+        self.start_installer(true)
     }
 
     /// A downloaded update goes in when the launcher quits, without starting it again.
     pub fn install_on_quit(&self) {
-        self.start_installer(&["/S", "/UPDATE"]);
+        self.start_installer(false);
     }
 
     /// For the UI test, which shows each state without a real update.
@@ -277,7 +277,7 @@ mod tests {
         checksums: Option<String>,
         checks: u32,
         downloads: u32,
-        runs: Vec<Vec<String>>,
+        runs: Vec<bool>,
         run_error: Option<String>,
         hold_check: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
     }
@@ -304,7 +304,7 @@ mod tests {
                 version,
                 page_url: String::new(),
                 installer: Asset { name: "YuiLauncher-Setup-1.1.0.exe".to_string(), size: 4, url: "https://secret.example/setup".to_string() },
-                checksums: Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://secret.example/sums".to_string() },
+                checksums: vec![Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://secret.example/sums".to_string() }],
             }))
         }
         fn fetch_text(&self, _: &str) -> Result<String, String> {
@@ -347,13 +347,13 @@ mod tests {
             Some(Updater {
                 releases: fake.clone(),
                 downloader: fake.clone(),
-                run_installer: Box::new(move |file, args| {
+                run_installer: Box::new(move |file, restart| {
                     assert!(file.exists(), "the installer is still there");
                     let mut world = runs.0.lock().unwrap();
                     if let Some(error) = &world.run_error {
                         return Err(error.clone());
                     }
-                    world.runs.push(args.iter().map(|arg| (*arg).to_string()).collect());
+                    world.runs.push(restart);
                     Ok(())
                 }),
             }),
@@ -499,7 +499,7 @@ mod tests {
         assert!(!setup.updater.install());
         setup.updater.check();
         assert!(setup.updater.install());
-        assert_eq!(setup.fake.0.lock().unwrap().runs, [["/S", "/UPDATE", "/R"]]);
+        assert_eq!(setup.fake.0.lock().unwrap().runs, [true]);
     }
 
     #[test]
@@ -507,7 +507,7 @@ mod tests {
         let setup = setup(long(), newer);
         setup.updater.check();
         setup.updater.install_on_quit();
-        assert_eq!(setup.fake.0.lock().unwrap().runs, [["/S", "/UPDATE"]]);
+        assert_eq!(setup.fake.0.lock().unwrap().runs, [false]);
     }
 
     #[test]

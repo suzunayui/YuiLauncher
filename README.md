@@ -1,6 +1,6 @@
 # YuiLauncher
 
-Yuiアプリの起動とアップデートをまとめて行うWindows向けランチャーです。
+Yuiアプリの起動とアップデートをまとめて行う、WindowsとMac（Apple Silicon）向けのランチャーです。
 
 ## 開発
 
@@ -27,10 +27,11 @@ npm run test:ui
 
 ## アプリの追加
 
-`src-tauri/src/catalog.rs`に1件追加し、アイコンを`assets/apps`に置きます。対象アプリのGitHub Releasesには次が必要です。
+`src-tauri/src/catalog.rs`に1件追加し、アイコンを`assets/apps`に置きます。Mac版もあるアプリは`mac`に`.app`の名前と配布ファイルの名前を書きます。`mac`がないアプリはMacでは表示しません。対象アプリのGitHub Releasesには次が必要です。
 
 - Windows用インストーラー（`installer_prefix`、バージョン、`installer_suffix`をつなげた名前）
-- インストーラーのSHA-256を記載したチェックサムファイル（`SHA256SUMS`で始まる`.txt`）
+- Mac版があれば、`.app`を入れた`.zip`か`.dmg`（`mac`の`installer_prefix`、バージョン、`installer_suffix`をつなげた名前）
+- インストーラーのSHA-256を記載したチェックサムファイル（`SHA256SUMS`で始まる`.txt`）。WindowsとMacで分けても構いません
 - `v2026.1107.1`形式のタグ。`-mac.1`や`-beta`が付くタグは対象外です
 
 ## 更新の流れ
@@ -48,6 +49,12 @@ npm run test:ui
 2. アプリが起動中なら閉じます。閉じられなくても強制終了はしません
 3. レジストリに登録されたアンインストーラーをサイレント実行します。インストール先の外にあるものは実行しません
 4. レジストリから登録が消えたことを確認します
+
+## Macでの動き
+
+インストール済みかは`/Applications`の`.app`と、その`Info.plist`のバージョンで判断します。インストールは`.zip`か`.dmg`から`.app`を取り出し、隣にコピーしてから入れ替えます。途中で失敗しても古いアプリは残ります。アプリを閉じるときはmacOSの「終了」を送り、強制終了はしません。アンインストールは`.app`をゴミ箱に移します。
+
+ランチャー自身の更新は、自分の`.app`を新しいものと入れ替えてから開き直します。ログは`~/Library/Logs/com.suzunayui.yuilauncher/self-update.log`に残ります。
 
 ## YuiLauncher自身の更新
 
@@ -73,4 +80,20 @@ npm version 2026.1107.1 --no-git-tag-version
 npm run dist
 ```
 
-`release`にインストーラー、チェックサム、`latest.yml`が作られます。この3つを`suzunayui/YuiLauncher`のGitHub Releaseに公開します。
+`release`にインストーラー、チェックサム、`latest.yml`が作られます。
+
+Mac版はMacでビルドします。Node.jsがないMacでは、Windowsで`node scripts/prepare-tauri-frontend.cjs`を実行して作った`src-tauri/frontend`を持っていき、次のようにします。
+
+```bash
+cargo install tauri-cli --version "^2" --locked
+```
+
+```bash
+cargo tauri build -c '{"build":{"beforeBuildCommand":""}}'
+```
+
+```bash
+scripts/package-mac.sh
+```
+
+`release`に`YuiLauncher-<バージョン>-mac-arm64.zip`とそのチェックサムが作られます。WindowsとMacのファイルをすべて同じGitHub Releaseに公開します。

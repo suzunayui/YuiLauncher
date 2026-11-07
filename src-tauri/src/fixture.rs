@@ -4,7 +4,7 @@
 use crate::catalog::{AppDef, APPS};
 use crate::download::{DownloadError, Downloader, Progress};
 use crate::releases::{Asset, Release, Releases};
-use crate::windows::{Installed, System, UninstallCommand};
+use crate::system::{Installed, System, UninstallCommand};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -83,7 +83,7 @@ impl System for Fixture {
         Ok(())
     }
 
-    fn run_installer(&self, file: &Path, _: &[&str]) -> Result<(), String> {
+    fn run_installer(&self, _: &AppDef, file: &Path, _: &[&str]) -> Result<(), String> {
         thread::sleep(Duration::from_millis(200));
         let name = file.file_name().unwrap_or_default().to_string_lossy().to_string();
         let mut apps = self.apps.lock().unwrap();
@@ -116,7 +116,7 @@ impl Releases for Fixture {
             version: fake.latest.to_string(),
             page_url: format!("https://github.com/{}/releases/tag/v{}", app.repo, fake.latest),
             installer: Asset { name: fake.installer.to_string(), size: 100, url: "https://example.invalid/installer".to_string() },
-            checksums: Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://example.invalid/sums".to_string() },
+            checksums: vec![Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://example.invalid/sums".to_string() }],
         }))
     }
 

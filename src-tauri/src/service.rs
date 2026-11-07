@@ -2,9 +2,9 @@
 
 use crate::catalog::AppDef;
 use crate::download::{DownloadError, Downloader};
-use crate::releases::{parse_checksums, Release, Releases};
+use crate::releases::{expected_checksum, Release, Releases};
 use crate::version::compare_versions;
-use crate::windows::{System, UninstallCommand};
+use crate::system::{System, UninstallCommand};
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
@@ -92,8 +92,14 @@ pub const CANCELLED: &str = "cancelled";
 
 pub type OnChange = Box<dyn Fn(StateView) + Send + Sync>;
 
+const NO_RELEASE: &str = if crate::catalog::ON_MAC {
+    "Mac版のリリースが見つかりませんでした。"
+} else {
+    "Windows版のリリースが見つかりませんでした。"
+};
+
 pub struct Service {
-    apps: &'static [AppDef],
+    apps: Vec<&'static AppDef>,
     system: Arc<dyn System>,
     releases: Arc<dyn Releases>,
     downloader: Arc<dyn Downloader>,
@@ -111,7 +117,7 @@ pub struct Service {
 }
 
 /// Puts the known ids first, in the given order, then any app the list doesn't name.
-fn order_from(apps: &[AppDef], ids: &[String]) -> Vec<usize> {
+fn order_from(apps: &[&AppDef], ids: &[String]) -> Vec<usize> {
     let mut order: Vec<usize> = Vec::new();
     for id in ids {
         if let Some(index) = apps.iter().position(|app| app.id == id) {
@@ -153,7 +159,7 @@ fn unique_dir(root: &Path) -> std::io::Result<PathBuf> {
 impl Service {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        apps: &'static [AppDef],
+        apps: Vec<&'static AppDef>,
         system: Arc<dyn System>,
         releases: Arc<dyn Releases>,
         downloader: Arc<dyn Downloader>,
@@ -162,6 +168,7 @@ impl Service {
         confirm_timeout: Duration,
         confirm_interval: Duration,
     ) -> Self {
+        let count = apps.len();
         Self {
             apps,
             system,
@@ -171,10 +178,10 @@ impl Service {
             on_change,
             confirm_timeout,
             confirm_interval,
-            store: Mutex::new(Store { entries: apps.iter().map(|_| Entry::default()).collect(), ..Store::default() }),
+            store: Mutex::new(Store { entries: (0..count).map(|_| Entry::default()).collect(), ..Store::default() }),
             check_done: Condvar::new(),
-            order: Mutex::new((0..apps.len()).collect()),
-            hidden: Mutex::new(vec![false; apps.len()]),
+            order: Mutex::new((0..count).collect()),
+            hidden: Mutex::new(vec![false; count]),
             settings_file: None,
         }
     }
@@ -187,7 +194,7 @@ impl Service {
             .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
             .unwrap_or_default();
         let ids = |key: &str| -> Vec<String> { serde_json::from_value(settings[key].clone()).unwrap_or_default() };
-        *self.order.get_mut().unwrap() = order_from(self.apps, &ids("order"));
+        *self.order.get_mut().unwrap() = order_from(&self.apps, &ids("order"));
         let hidden = ids("hidden");
         *self.hidden.get_mut().unwrap() = self.apps.iter().map(|app| hidden.iter().any(|id| id == app.id)).collect();
         self.settings_file = Some(file);
@@ -211,7 +218,7 @@ impl Service {
     }
 
     pub fn set_order(&self, ids: &[String]) -> Result<(), String> {
-        *self.order.lock().unwrap() = order_from(self.apps, ids);
+        *self.order.lock().unwrap() = order_from(&self.apps, ids);
         self.changed();
         self.save_settings()
     }
@@ -247,7 +254,7 @@ impl Service {
                     version: entry.version.clone(),
                     can_open: entry.exe_path.is_some(),
                     can_uninstall: entry.uninstaller.is_some(),
-                    uninstall_note: app.uninstall_note,
+                    uninstall_note: app.uninstall_note(),
                     running: entry.running,
                     latest_version: entry.release.as_ref().map(|release| release.version.clone()),
                     has_release_page: entry.release.as_ref().is_some_and(|release| !release.page_url.is_empty()),
@@ -340,7 +347,7 @@ impl Service {
                         }
                         Ok(None) => {
                             entry.release = None;
-                            entry.check_error = Some("Windows版のリリースが見つかりませんでした。".to_string());
+                            entry.check_error = Some(NO_RELEASE.to_string());
                         }
                         // Keeps the last known release so an offline check doesn't hide an update.
                         Err(message) => entry.check_error = Some(message),
@@ -401,12 +408,10 @@ impl Service {
         };
 
         self.set_task(index, "verifying", None);
-        let text = self.releases.fetch_text(&release.checksums.url).map_err(Failure::User)?;
-        let checksums = parse_checksums(&text);
-        let Some(expected) = checksums.get(&release.installer.name) else {
+        let Some(expected) = expected_checksum(self.releases.as_ref(), release).map_err(Failure::User)? else {
             return Err(Failure::User("チェックサムにこのインストーラーの記載がありません。".to_string()));
         };
-        if *expected != sha256 {
+        if expected != sha256 {
             return Err(Failure::User("ファイルの検証に失敗しました。もう一度お試しください。".to_string()));
         }
         Ok(dest)
@@ -467,7 +472,7 @@ impl Service {
         if self.with(index, |entry| entry.installed) {
             args.extend_from_slice(app.update_args);
         }
-        self.system.run_installer(&installer, &args)?;
+        self.system.run_installer(app, &installer, &args)?;
         self.set_task(index, "confirming", None);
         self.wait_for_version(index, &release.version)
     }
@@ -669,7 +674,7 @@ mod tests {
     use crate::download::Progress;
     use crate::releases::Asset;
     use crate::testutil::{temp_dir, TempDir};
-    use crate::windows::Installed;
+    use crate::system::Installed;
     use std::sync::atomic::Ordering as Atomic;
     use std::sync::mpsc;
 
@@ -690,6 +695,7 @@ mod tests {
         uninstall_args: &["/S"],
         uninstall_note: "",
         icon: "",
+        mac: None,
     }];
 
     #[derive(Default)]
@@ -758,7 +764,7 @@ mod tests {
             world.running = true;
             Ok(())
         }
-        fn run_installer(&self, file: &Path, args: &[&str]) -> Result<(), String> {
+        fn run_installer(&self, _: &AppDef, file: &Path, args: &[&str]) -> Result<(), String> {
             let mut world = self.world.lock().unwrap();
             if let Some(error) = world.installer_error.clone() {
                 return Err(error);
@@ -776,7 +782,9 @@ mod tests {
             if let Some(error) = world.uninstaller_error.clone() {
                 return Err(error);
             }
-            world.log.push(format!("uninstall:{}:{}", command.file.file_name().unwrap().to_string_lossy(), command.args.join(" ")));
+            // The fake's paths are Windows ones, which a Mac doesn't split at backslashes.
+            let name = command.file.to_string_lossy().rsplit(['\\', '/']).next().unwrap_or_default().to_string();
+            world.log.push(format!("uninstall:{name}:{}", command.args.join(" ")));
             if !world.uninstaller_does_nothing {
                 world.version = None;
             }
@@ -798,7 +806,7 @@ mod tests {
                 version,
                 page_url: world.page_url.clone().unwrap_or_else(|| "https://github.com/owner/Demo/releases/tag/x".to_string()),
                 installer: Asset { name: "Demo-Setup.exe".to_string(), size: 1, url: "https://github.com/owner/Demo/installer".to_string() },
-                checksums: Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://github.com/owner/Demo/sums".to_string() },
+                checksums: vec![Asset { name: "SHA256SUMS.txt".to_string(), size: 1, url: "https://github.com/owner/Demo/sums".to_string() }],
             }))
         }
         fn fetch_text(&self, _: &str) -> Result<String, String> {
@@ -857,7 +865,7 @@ mod tests {
         });
         let temp = temp_dir();
         let service = Arc::new(Service::new(
-            &DEMO,
+            DEMO.iter().collect(),
             fake.clone(),
             fake.clone(),
             fake.clone(),
@@ -1151,7 +1159,7 @@ mod tests {
 
     fn catalog_service(fake: &Arc<Fake>, settings: &Path) -> Service {
         Service::new(
-            &crate::catalog::APPS,
+            crate::catalog::APPS.iter().collect(),
             fake.clone(),
             fake.clone(),
             fake.clone(),

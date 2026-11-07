@@ -1,33 +1,63 @@
 //! Apps managed by the launcher. Add an entry to APPS to manage another app.
 
+/// How an app is installed on a Mac. An app without one isn't shown there.
+#[derive(Clone, Copy)]
+pub struct MacDef {
+    /// The bundle's folder name in /Applications.
+    pub bundle: &'static str,
+    /// The release asset is the prefix, a version, then the suffix: a .zip or .dmg holding the bundle.
+    pub installer_prefix: &'static str,
+    pub installer_suffix: &'static str,
+    pub uninstall_note: &'static str,
+}
+
 pub struct AppDef {
     pub id: &'static str,
     pub name: &'static str,
     pub description: &'static str,
     pub repo: &'static str,
     /// The app's key under ...\CurrentVersion\Uninstall.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub registry_key: &'static str,
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub exe_name: &'static str,
     pub installer_prefix: &'static str,
     pub installer_suffix: &'static str,
     pub silent_args: &'static [&'static str],
     /// Added when updating. Tauri's installer needs /UPDATE to not bring back a removed desktop shortcut.
     pub update_args: &'static [&'static str],
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub uninstall_args: &'static [&'static str],
     pub uninstall_note: &'static str,
     pub icon: &'static str,
+    pub mac: Option<MacDef>,
 }
+
+pub const ON_MAC: bool = cfg!(target_os = "macos");
 
 impl AppDef {
     /// The installer's name is the prefix, a version, then the suffix.
-    pub fn is_installer(&self, name: &str) -> bool {
-        name.strip_prefix(self.installer_prefix)
-            .and_then(|rest| rest.strip_suffix(self.installer_suffix))
+    pub fn is_installer_for(&self, name: &str, mac: bool) -> bool {
+        let affixes = if mac {
+            self.mac.as_ref().map(|mac| (mac.installer_prefix, mac.installer_suffix))
+        } else {
+            Some((self.installer_prefix, self.installer_suffix))
+        };
+        let Some((prefix, suffix)) = affixes else { return false };
+        name.strip_prefix(prefix)
+            .and_then(|rest| rest.strip_suffix(suffix))
             .is_some_and(|version| !version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.'))
     }
 
     pub fn is_checksums(&self, name: &str) -> bool {
         name.starts_with("SHA256SUMS") && name.ends_with(".txt")
+    }
+
+    pub fn uninstall_note(&self) -> &'static str {
+        match (&self.mac, ON_MAC) {
+            (Some(mac), true) => mac.uninstall_note,
+            _ => self.uninstall_note,
+        }
     }
 }
 
@@ -46,6 +76,12 @@ pub static APPS: [AppDef; 3] = [
         uninstall_args: &["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
         uninstall_note: "設定、VRMの履歴、ログは残ります。仮想カメラの登録は削除されます。",
         icon: "../assets/apps/YuiTracking.ico",
+        mac: Some(MacDef {
+            bundle: "YuiTracking.app",
+            installer_prefix: "YuiTracking-",
+            installer_suffix: "-arm64-mac.zip",
+            uninstall_note: "アプリはゴミ箱に移動します。設定、VRMの履歴、ログは残ります。",
+        }),
     },
     AppDef {
         id: "yuivoicechanger",
@@ -61,6 +97,12 @@ pub static APPS: [AppDef; 3] = [
         uninstall_args: &["/S"],
         uninstall_note: "設定とPython環境（ホームの.YuiVoiceChanger）、音声モデル、OBSプラグインは残ります。",
         icon: "../assets/apps/YuiVoiceChanger.ico",
+        mac: Some(MacDef {
+            bundle: "YuiVoiceChanger.app",
+            installer_prefix: "YuiVoiceChanger-",
+            installer_suffix: "-mac-arm64.dmg",
+            uninstall_note: "アプリはゴミ箱に移動します。設定とPython環境（ホームの.YuiVoiceChanger）、音声モデルは残ります。",
+        }),
     },
     AppDef {
         id: "yuilivekit",
@@ -76,8 +118,14 @@ pub static APPS: [AppDef; 3] = [
         uninstall_args: &["/S"],
         uninstall_note: "コメント、設定、字幕用のモデルなどのデータは残ります。",
         icon: "../assets/apps/YuiLiveKit.ico",
+        mac: None,
     },
 ];
+
+/// The apps this platform can install: on a Mac, only those with a Mac version.
+pub fn platform_apps() -> Vec<&'static AppDef> {
+    APPS.iter().filter(|app| !ON_MAC || app.mac.is_some()).collect()
+}
 
 /// The launcher itself, for finding its own releases. It is not listed as an app.
 pub static LAUNCHER: AppDef = AppDef {
@@ -94,6 +142,12 @@ pub static LAUNCHER: AppDef = AppDef {
     uninstall_args: &["/S"],
     uninstall_note: "",
     icon: "",
+    mac: Some(MacDef {
+        bundle: "YuiLauncher.app",
+        installer_prefix: "YuiLauncher-",
+        installer_suffix: "-mac-arm64.zip",
+        uninstall_note: "",
+    }),
 };
 
 #[cfg(test)]
@@ -111,9 +165,12 @@ mod tests {
     }
 
     #[test]
-    fn ids_and_executables_are_unique() {
+    fn ids_executables_and_bundles_are_unique() {
         assert_eq!(APPS.iter().map(|app| app.id).collect::<HashSet<_>>().len(), APPS.len());
         assert_eq!(APPS.iter().map(|app| app.exe_name).collect::<HashSet<_>>().len(), APPS.len());
+        let bundles: Vec<_> = APPS.iter().filter_map(|app| app.mac.as_ref().map(|mac| mac.bundle)).collect();
+        assert_eq!(bundles.iter().collect::<HashSet<_>>().len(), bundles.len());
+        assert!(bundles.iter().all(|bundle| bundle.ends_with(".app")));
     }
 
     #[test]
@@ -121,16 +178,31 @@ mod tests {
         for app in &APPS {
             assert!(!app.uninstall_args.is_empty(), "{}", app.id);
             assert!(!app.uninstall_note.is_empty(), "{}", app.id);
+            if let Some(mac) = &app.mac {
+                assert!(!mac.uninstall_note.is_empty(), "{}", app.id);
+            }
         }
     }
 
     #[test]
-    fn recognises_installer_names() {
-        assert!(APPS[0].is_installer("YuiTracking-Setup-2026.1107.1-x64.exe"));
-        assert!(!APPS[0].is_installer("YuiTracking-Setup-2026.1107.1.exe"));
-        assert!(!APPS[1].is_installer("YuiVoiceChanger-Setup-.exe"));
-        assert!(!APPS[1].is_installer("YuiVoiceChanger-Setup-1.0-beta.exe"));
-        assert!(LAUNCHER.is_installer("YuiLauncher-Setup-2026.1107.10.exe"));
-        assert!(!LAUNCHER.is_installer("YuiLauncher-Setup-2026.1107.10.exe.blockmap"));
+    fn recognises_windows_installer_names() {
+        assert!(APPS[0].is_installer_for("YuiTracking-Setup-2026.1107.1-x64.exe", false));
+        assert!(!APPS[0].is_installer_for("YuiTracking-Setup-2026.1107.1.exe", false));
+        assert!(!APPS[0].is_installer_for("YuiTracking-2026.1107.1-arm64-mac.zip", false));
+        assert!(!APPS[1].is_installer_for("YuiVoiceChanger-Setup-.exe", false));
+        assert!(!APPS[1].is_installer_for("YuiVoiceChanger-Setup-1.0-beta.exe", false));
+        assert!(LAUNCHER.is_installer_for("YuiLauncher-Setup-2026.1107.10.exe", false));
+        assert!(!LAUNCHER.is_installer_for("YuiLauncher-Setup-2026.1107.10.exe.blockmap", false));
+    }
+
+    #[test]
+    fn recognises_mac_installer_names() {
+        assert!(APPS[0].is_installer_for("YuiTracking-2026.1107.1-arm64-mac.zip", true));
+        assert!(!APPS[0].is_installer_for("YuiTracking-2026.1107.1-arm64.dmg", true));
+        assert!(!APPS[0].is_installer_for("YuiTracking-Setup-2026.1107.1-x64.exe", true));
+        assert!(APPS[1].is_installer_for("YuiVoiceChanger-2026.1103.34-mac-arm64.dmg", true));
+        assert!(!APPS[1].is_installer_for("YuiVoiceChanger-0.3.0-beta.7-mac-arm64-preview.zip", true));
+        assert!(!APPS[2].is_installer_for("YuiLiveKit-Setup-2026.1107.1.exe", true), "no Mac version");
+        assert!(LAUNCHER.is_installer_for("YuiLauncher-2026.1107.13-mac-arm64.zip", true));
     }
 }

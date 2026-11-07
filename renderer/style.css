@@ -43,7 +43,7 @@ body {
   padding: 24px;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 "Yu Gothic UI", "Segoe UI", sans-serif;
+  font: 14px/1.5 "Yu Gothic UI", "Segoe UI", "Hiragino Sans", -apple-system, sans-serif;
 }
 
 h1,

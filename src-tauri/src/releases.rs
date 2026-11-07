@@ -20,7 +20,8 @@ pub struct Release {
     pub version: String,
     pub page_url: String,
     pub installer: Asset,
-    pub checksums: Asset,
+    /// Every checksum file in the release: some keep Windows and Mac in separate files.
+    pub checksums: Vec<Asset>,
 }
 
 pub trait Releases: Send + Sync {
@@ -49,9 +50,13 @@ fn trusted_asset(asset: &Value, app: &AppDef) -> Option<Asset> {
     })
 }
 
-/// Picks the newest stable release holding this app's Windows installer.
-/// A Mac-only release or a -mac.1 / -beta tag must never hide the Windows one.
+/// Picks the newest stable release holding this app's installer for this platform.
+/// A release for the other platform or a -mac.1 / -beta tag must never hide it.
 pub fn pick_latest_release(releases: &Value, app: &AppDef) -> Option<Release> {
+    pick_latest_release_for(releases, app, crate::catalog::ON_MAC)
+}
+
+pub fn pick_latest_release_for(releases: &Value, app: &AppDef, mac: bool) -> Option<Release> {
     let mut best: Option<Release> = None;
     for release in releases.as_array().into_iter().flatten() {
         if release["draft"].as_bool().unwrap_or(false) || release["prerelease"].as_bool().unwrap_or(false) {
@@ -63,15 +68,18 @@ pub fn pick_latest_release(releases: &Value, app: &AppDef) -> Option<Release> {
             continue;
         }
         let assets = release["assets"].as_array().map(Vec::as_slice).unwrap_or_default();
-        let named = |test: &dyn Fn(&str) -> bool| {
-            assets.iter().find(|asset| test(asset["name"].as_str().unwrap_or_default()))
-        };
-        let (Some(installer), Some(checksums)) = (named(&|name| app.is_installer(name)), named(&|name| app.is_checksums(name))) else {
+        let name_of = |asset: &Value| asset["name"].as_str().unwrap_or_default().to_string();
+        let Some(installer) = assets.iter().find(|asset| app.is_installer_for(&name_of(asset), mac)).and_then(|asset| trusted_asset(asset, app)) else {
             continue;
         };
-        let (Some(installer), Some(checksums)) = (trusted_asset(installer, app), trusted_asset(checksums, app)) else {
+        let checksums: Vec<Asset> = assets
+            .iter()
+            .filter(|asset| app.is_checksums(&name_of(asset)))
+            .filter_map(|asset| trusted_asset(asset, app))
+            .collect();
+        if checksums.is_empty() {
             continue;
-        };
+        }
         if best.as_ref().is_some_and(|current| compare_versions(version, &current.version) != Some(Ordering::Greater)) {
             continue;
         }
@@ -83,6 +91,24 @@ pub fn pick_latest_release(releases: &Value, app: &AppDef) -> Option<Release> {
         });
     }
     best
+}
+
+/// The installer's hash from whichever checksum file lists it. None when none does.
+pub fn expected_checksum(releases: &dyn Releases, release: &Release) -> Result<Option<String>, String> {
+    let mut failure = None;
+    for asset in &release.checksums {
+        match releases.fetch_text(&asset.url) {
+            Ok(text) => {
+                if let Some(hash) = parse_checksums(&text).remove(&release.installer.name) {
+                    return Ok(Some(hash));
+                }
+            }
+            Err(error) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    failure.map_or(Ok(None), Err)
 }
 
 /// Reads `<sha256>  <name>` and `<sha256> *<name>` lines. Names map to lower-case hashes.
@@ -175,6 +201,10 @@ mod tests {
     use crate::testutil::serve;
     use serde_json::json;
 
+    fn pick_windows(releases: &Value, app: &AppDef) -> Option<Release> {
+        pick_latest_release_for(releases, app, false)
+    }
+
     fn voice() -> &'static AppDef {
         &APPS[1]
     }
@@ -188,12 +218,16 @@ mod tests {
     }
 
     fn voice_release(tag: &str, version: &str) -> Value {
-        release_of(tag, &[&format!("YuiVoiceChanger-Setup-{version}.exe"), "SHA256SUMS.txt"], voice().repo)
+        release_of(
+            tag,
+            &[&format!("YuiVoiceChanger-Setup-{version}.exe"), &format!("YuiVoiceChanger-{version}-mac-arm64.dmg"), "SHA256SUMS.txt"],
+            voice().repo,
+        )
     }
 
     #[test]
     fn skips_a_newer_mac_only_release() {
-        let picked = pick_latest_release(
+        let picked = pick_windows(
             &json!([
                 release_of("v2026.1110.1", &["YuiVoiceChanger-2026.1110.1-mac-arm64.dmg", "SHA256SUMS.txt"], voice().repo),
                 voice_release("v2026.1104.31", "2026.1104.31"),
@@ -209,7 +243,7 @@ mod tests {
         draft["draft"] = json!(true);
         let mut prerelease = voice_release("v2026.1201.1", "2026.1201.1");
         prerelease["prerelease"] = json!(true);
-        let picked = pick_latest_release(
+        let picked = pick_windows(
             &json!([
                 voice_release("v2026.1103.34-mac.1", "2026.1103.34"),
                 voice_release("v0.3.0-beta.7", "0.3.0"),
@@ -224,14 +258,14 @@ mod tests {
 
     #[test]
     fn picks_the_highest_version_regardless_of_order() {
-        let picked = pick_latest_release(&json!([voice_release("v2026.103.1", "2026.103.1"), voice_release("v2026.1021.3", "2026.1021.3")]), voice());
+        let picked = pick_windows(&json!([voice_release("v2026.103.1", "2026.103.1"), voice_release("v2026.1021.3", "2026.1021.3")]), voice());
         assert_eq!(picked.unwrap().version, "2026.1021.3");
     }
 
     #[test]
     fn finds_the_tracking_installer_among_mac_assets_and_versioned_checksums() {
         let tracking = &APPS[0];
-        let picked = pick_latest_release(
+        let picked = pick_windows(
             &json!([release_of(
                 "v2026.1107.1",
                 &["SHA256SUMS-2026.1107.1.txt", "YuiTracking-2026.1107.1-arm64-mac.zip", "YuiTracking-2026.1107.1-arm64.dmg", "YuiTracking-Setup-2026.1107.1-x64.exe"],
@@ -241,13 +275,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(picked.installer.name, "YuiTracking-Setup-2026.1107.1-x64.exe");
-        assert_eq!(picked.checksums.name, "SHA256SUMS-2026.1107.1.txt");
+        assert_eq!(picked.checksums[0].name, "SHA256SUMS-2026.1107.1.txt");
     }
 
     #[test]
     fn livekit_skips_releases_from_its_former_name() {
         let live_kit = &APPS[2];
-        let picked = pick_latest_release(
+        let picked = pick_windows(
             &json!([
                 release_of("YouTubeOverlay-2026.10.10-18", &["YouTubeOverlay-2026.10.10-18.exe"], live_kit.repo),
                 release_of("v2026.1107.1", &["YuiLiveKit-Setup-2026.1107.1.exe", "SHA256SUMS.txt"], live_kit.repo),
@@ -260,10 +294,10 @@ mod tests {
 
     #[test]
     fn requires_checksums_and_rejects_assets_hosted_elsewhere() {
-        assert!(pick_latest_release(&json!([release_of("v1.0.0", &["YuiVoiceChanger-Setup-1.0.0.exe"], voice().repo)]), voice()).is_none());
+        assert!(pick_windows(&json!([release_of("v1.0.0", &["YuiVoiceChanger-Setup-1.0.0.exe"], voice().repo)]), voice()).is_none());
         let mut foreign = voice_release("v1.0.0", "1.0.0");
         foreign["assets"][0]["browser_download_url"] = json!("https://example.com/YuiVoiceChanger-Setup-1.0.0.exe");
-        assert!(pick_latest_release(&json!([foreign]), voice()).is_none());
+        assert!(pick_windows(&json!([foreign]), voice()).is_none());
     }
 
     #[test]
@@ -296,5 +330,79 @@ mod tests {
         assert!(GitHub::with_root(&root).unwrap().latest(voice()).unwrap_err().contains("上限"));
         let offline = GitHub::with_root("http://127.0.0.1:9").unwrap();
         assert!(offline.latest(voice()).unwrap_err().contains("インターネット"));
+    }
+
+    #[test]
+    fn a_mac_picks_its_own_installer_and_every_checksum_file() {
+        let tracking = &APPS[0];
+        let picked = pick_latest_release_for(
+            &json!([release_of(
+                "v2026.1107.1",
+                &["SHA256SUMS-2026.1107.1.txt", "YuiTracking-2026.1107.1-arm64-mac.zip", "YuiTracking-2026.1107.1-arm64.dmg", "YuiTracking-Setup-2026.1107.1-x64.exe"],
+                tracking.repo,
+            )]),
+            tracking,
+            true,
+        )
+        .unwrap();
+        assert_eq!(picked.installer.name, "YuiTracking-2026.1107.1-arm64-mac.zip");
+
+        let voice_mac = pick_latest_release_for(
+            &json!([release_of(
+                "v2026.1103.34",
+                &["SHA256SUMS-mac-arm64.txt", "SHA256SUMS.txt", "YuiVoiceChanger-2026.1103.34-mac-arm64.dmg", "YuiVoiceChanger-Setup-2026.1103.34.exe"],
+                voice().repo,
+            )]),
+            voice(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(voice_mac.installer.name, "YuiVoiceChanger-2026.1103.34-mac-arm64.dmg");
+        assert_eq!(voice_mac.checksums.len(), 2);
+    }
+
+    #[test]
+    fn a_mac_skips_windows_only_releases_and_apps_without_a_mac_version() {
+        let newer_windows_only = release_of("v2026.1107.7", &["YuiVoiceChanger-Setup-2026.1107.7.exe", "SHA256SUMS.txt"], voice().repo);
+        let picked = pick_latest_release_for(&json!([newer_windows_only, voice_release("v2026.1103.34", "2026.1103.34")]), voice(), true);
+        assert_eq!(picked.unwrap().version, "2026.1103.34");
+        let live_kit = &APPS[2];
+        let release = release_of("v2026.1107.1", &["YuiLiveKit-Setup-2026.1107.1.exe", "SHA256SUMS.txt"], live_kit.repo);
+        assert!(pick_latest_release_for(&json!([release]), live_kit, true).is_none());
+    }
+
+    struct Texts(Vec<(&'static str, Result<String, String>)>);
+
+    impl Releases for Texts {
+        fn latest(&self, _: &AppDef) -> Result<Option<Release>, String> {
+            Ok(None)
+        }
+        fn fetch_text(&self, url: &str) -> Result<String, String> {
+            self.0.iter().find(|(name, _)| url.ends_with(name)).map(|(_, text)| text.clone()).unwrap()
+        }
+    }
+
+    fn release_with_sums(names: &[&str]) -> Release {
+        let asset = |name: &str| Asset { name: name.to_string(), size: 1, url: format!("https://github.com/x/releases/download/v1/{name}") };
+        Release { version: "1".to_string(), page_url: String::new(), installer: asset("App.dmg"), checksums: names.iter().map(|name| asset(name)).collect() }
+    }
+
+    #[test]
+    fn finds_the_hash_in_whichever_checksum_file_lists_the_installer() {
+        let hash = "a".repeat(64);
+        let texts = Texts(vec![
+            ("SHA256SUMS.txt", Ok(format!("{}  App.exe
+", "b".repeat(64)))),
+            ("SHA256SUMS-mac.txt", Ok(format!("{hash}  App.dmg
+"))),
+        ]);
+        let release = release_with_sums(&["SHA256SUMS.txt", "SHA256SUMS-mac.txt"]);
+        assert_eq!(expected_checksum(&texts, &release), Ok(Some(hash)));
+
+        let unlisted = Texts(vec![("SHA256SUMS.txt", Ok("nothing".to_string()))]);
+        assert_eq!(expected_checksum(&unlisted, &release_with_sums(&["SHA256SUMS.txt"])), Ok(None));
+
+        let failing = Texts(vec![("SHA256SUMS.txt", Err("down".to_string()))]);
+        assert_eq!(expected_checksum(&failing, &release_with_sums(&["SHA256SUMS.txt"])), Err("down".to_string()));
     }
 }

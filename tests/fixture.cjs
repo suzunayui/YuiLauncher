@@ -19,8 +19,20 @@ function create() {
     yuilivekit: 'YuiLiveKit-Setup-2026.1107.1.exe',
   };
   const catalog = realCatalog;
+  // The UI test drives this from the main process to show each update state.
+  const updater = new (require('node:events').EventEmitter)();
+  updater.checks = 0;
+  updater.installs = 0;
+  updater.checkForUpdates = async () => {
+    updater.checks += 1;
+    updater.emit('checking-for-update');
+    updater.emit('update-not-available', {});
+  };
+  updater.quitAndInstall = () => { updater.installs += 1; };
+  global.fixtureUpdater = updater;
   return {
     catalog,
+    updater,
     system: {
       readInstalled: async app => (world[app.id].version
         ? {

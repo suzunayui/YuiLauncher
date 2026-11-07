@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('launcher', {
   cancel: id => ipcRenderer.invoke('app:cancel', id),
   openReleasePage: id => ipcRenderer.invoke('app:release-page', id),
   openSupportPage: () => ipcRenderer.invoke('support:open'),
+  getSelfUpdate: () => ipcRenderer.invoke('self:get'),
   installSelfUpdate: () => ipcRenderer.invoke('self:install'),
   onState: listener => ipcRenderer.on('state', (_event, state) => listener(state)),
   onSelfUpdate: listener => ipcRenderer.on('self-update', (_event, state) => listener(state)),

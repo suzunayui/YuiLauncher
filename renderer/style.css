@@ -134,8 +134,22 @@ h1 {
   color: var(--accent-soft-text);
 }
 
-.self-update[hidden] {
+.self-update[hidden],
+.self-update .button[hidden] {
   display: none;
+}
+
+.self-update.error {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--danger);
+}
+
+.own-version {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .apps {

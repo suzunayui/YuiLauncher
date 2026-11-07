@@ -42,6 +42,47 @@ async function main() {
     assert.equal(overflow, false, 'no horizontal scroll');
     await shot(page, '1-update-available');
 
+    const emit = (name, payload) => app.evaluate((_electron, args) => {
+      global.fixtureUpdater.emit(args.name, args.payload);
+    }, { name, payload });
+    const banner = page.locator('#self-update');
+    const ownVersion = page.locator('#own-version');
+    const appVersion = await app.evaluate(({ app: electronApp }) => electronApp.getVersion());
+    await ownVersion.getByText(`${appVersion} ・ 最新です`).waitFor();
+    assert.equal(await banner.isVisible(), false, 'no banner while up to date');
+
+    const checksBefore = await app.evaluate(() => global.fixtureUpdater.checks);
+    await page.getByRole('button', { name: '更新を確認' }).click();
+    await page.waitForFunction(() => !document.getElementById('check').disabled);
+    assert.equal(await app.evaluate(() => global.fixtureUpdater.checks), checksBefore + 1, 'the button checks the launcher too');
+
+    await emit('checking-for-update', {});
+    assert.equal((await ownVersion.textContent()).includes('最新です'), false);
+    await emit('error', { message: 'HttpError https://secret.example/' });
+    await banner.getByText('YuiLauncherの更新を確認できませんでした').waitFor();
+    assert.equal((await banner.textContent()).includes('secret.example'), false);
+    assert.equal(await page.locator('#self-update-install').isVisible(), false, 'nothing to install after a failure');
+    await shot(page, '7-self-update-error');
+
+    await emit('checking-for-update', {});
+    await banner.waitFor({ state: 'hidden' });
+    await emit('update-available', { version: '2099.1.1' });
+    await emit('download-progress', { percent: 42.5 });
+    await banner.getByText('YuiLauncher 2099.1.1 をダウンロード中 42%').waitFor();
+    assert.equal(await page.locator('#self-update-install').isVisible(), false, 'not installable yet');
+    await shot(page, '8-self-update-downloading');
+
+    await emit('update-downloaded', { version: '2099.1.1' });
+    await banner.getByText('YuiLauncher 2099.1.1 の準備ができました。').waitFor();
+    await shot(page, '9-self-update-ready');
+    await page.getByRole('button', { name: '再起動して更新' }).click();
+    await page.waitForFunction(() => true);
+    assert.equal(await app.evaluate(() => global.fixtureUpdater.installs), 1);
+
+    await page.reload();
+    await page.locator('#self-update').getByText('YuiLauncher 2099.1.1 の準備ができました。').waitFor();
+    await tracking.getByRole('button', { name: 'アップデート' }).waitFor();
+
     // Records the URL instead of opening a real browser.
     await app.evaluate(({ shell }) => {
       global.openedUrls = [];

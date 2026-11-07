@@ -4,6 +4,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = requir
 const path = require('node:path');
 const catalog = require('./catalog.cjs');
 const { createService } = require('./service.cjs');
+const { createFileLogger, createSelfUpdater } = require('./self-update.cjs');
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const RUNNING_INTERVAL_MS = 5000;
@@ -11,7 +12,7 @@ const SUPPORT_URL = 'https://suzunayui.fanbox.cc/';
 
 let window = null;
 let service = null;
-let selfUpdateReady = false;
+let selfUpdater = null;
 
 function send(channel, payload) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
@@ -27,6 +28,7 @@ function dependencies() {
     system: require('./windows.cjs'),
     releases: createReleaseClient(),
     downloader: require('./download.cjs'),
+    updater: app.isPackaged ? require('electron-updater').autoUpdater : null,
   };
 }
 
@@ -39,7 +41,7 @@ function handle(channel, listener) {
 
 function registerIpc() {
   handle('state:get', () => service.snapshot());
-  handle('state:check', () => service.check());
+  handle('state:check', () => Promise.all([service.check(), selfUpdater.check()]));
   handle('app:open', id => service.open(id));
   handle('app:install', (id, closeRunning) => service.install(id, { closeRunning: closeRunning === true }));
   handle('app:uninstall', (id, closeRunning) => service.uninstall(id, { closeRunning: closeRunning === true }));
@@ -49,16 +51,16 @@ function registerIpc() {
     return url ? shell.openExternal(url) : undefined;
   });
   handle('support:open', () => shell.openExternal(SUPPORT_URL));
+  handle('self:get', () => selfUpdater.getState());
   handle('self:install', () => {
-    if (!selfUpdateReady || service.isBusy()) return;
-    require('electron-updater').autoUpdater.quitAndInstall();
+    if (!service.isBusy()) selfUpdater.install();
   });
 }
 
 function createWindow() {
   window = new BrowserWindow({
     width: 760,
-    height: 520,
+    height: 600,
     minWidth: 520,
     minHeight: 400,
     title: 'YuiLauncher',
@@ -92,23 +94,6 @@ function createWindow() {
   window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 }
 
-// The launcher's own update. Failures stay silent: the launcher keeps working,
-// and the update is retried at the next check.
-function checkSelfUpdate() {
-  if (!app.isPackaged) return;
-  const { autoUpdater } = require('electron-updater');
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.removeAllListeners('update-downloaded');
-  autoUpdater.on('update-downloaded', info => {
-    selfUpdateReady = true;
-    send('self-update', { version: info.version });
-  });
-  autoUpdater.removeAllListeners('error');
-  autoUpdater.on('error', error => console.error('Self update failed', error));
-  autoUpdater.checkForUpdates().catch(error => console.error('Self update check failed', error));
-}
-
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -130,13 +115,19 @@ if (!app.requestSingleInstanceLock()) {
       tempRoot: app.getPath('temp'),
       onChange: state => send('state', state),
     });
+    selfUpdater = createSelfUpdater({
+      updater: deps.updater,
+      version: app.getVersion(),
+      logger: createFileLogger(path.join(app.getPath('userData'), 'logs', 'self-update.log')),
+      onChange: state => send('self-update', state),
+    });
     registerIpc();
     createWindow();
     service.check();
-    checkSelfUpdate();
+    selfUpdater.check();
     setInterval(() => {
       service.check();
-      checkSelfUpdate();
+      selfUpdater.check();
     }, CHECK_INTERVAL_MS);
     setInterval(() => service.refreshRunning(), RUNNING_INTERVAL_MS);
   });

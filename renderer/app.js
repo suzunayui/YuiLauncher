@@ -17,6 +17,7 @@ const elements = {
   selfUpdate: document.getElementById('self-update'),
   selfUpdateText: document.getElementById('self-update-text'),
   selfUpdateInstall: document.getElementById('self-update-install'),
+  ownVersion: document.getElementById('own-version'),
   dialog: document.getElementById('close-dialog'),
   dialogTitle: document.getElementById('close-title'),
   dialogBody: document.getElementById('close-body'),
@@ -171,7 +172,23 @@ function summaryText(state) {
   return [updates, checkedAt].filter(Boolean).join(' ・ ');
 }
 
+function renderSelfUpdate(state) {
+  const { phase, currentVersion, latestVersion, percent, error } = state;
+  elements.ownVersion.textContent = phase === 'latest' ? `${currentVersion} ・ 最新です` : currentVersion;
+  const messages = {
+    downloading: `YuiLauncher ${latestVersion} をダウンロード中 ${percent ?? 0}%`,
+    ready: `YuiLauncher ${latestVersion} の準備ができました。`,
+    error,
+  };
+  const message = messages[phase];
+  elements.selfUpdate.hidden = !message;
+  elements.selfUpdate.classList.toggle('error', phase === 'error');
+  elements.selfUpdateText.textContent = message || '';
+  elements.selfUpdateInstall.hidden = phase !== 'ready';
+}
+
 function render(state) {
+  elements.selfUpdateInstall.disabled = state.apps.some(app => app.task);
   const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
   elements.apps.replaceChildren(...state.apps.map(card));
   elements.summary.textContent = summaryText(state);
@@ -197,8 +214,7 @@ elements.dialogConfirm.addEventListener('click', () => {
 elements.selfUpdateInstall.addEventListener('click', () => window.launcher.installSelfUpdate());
 
 window.launcher.onState(render);
-window.launcher.onSelfUpdate(({ version }) => {
-  elements.selfUpdateText.textContent = `YuiLauncher ${version} の準備ができました。`;
-  elements.selfUpdate.hidden = false;
-});
+window.launcher.onSelfUpdate(renderSelfUpdate);
 window.launcher.getState().then(render);
+// Asks once on load: a cached update can be reported before this page is listening.
+window.launcher.getSelfUpdate().then(renderSelfUpdate);

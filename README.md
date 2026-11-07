@@ -19,6 +19,10 @@ npm run test:ui
 
 `npm run test:ui`は`tests/fixture.cjs`の偽データで動くため、GitHubや実際のアプリには触れません。
 
+## アイコン
+
+`assets/icon-source.webp`（正方形）を差し替えて`npm run icon`を実行すると、`assets/icon.ico`と`assets/icon.png`を作り直します。
+
 ## アプリの追加
 
 `electron/catalog.cjs`に1件追加し、アイコンを`assets/apps`に置きます。対象アプリのGitHub Releasesには次が必要です。

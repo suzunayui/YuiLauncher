@@ -1,6 +1,6 @@
 {
   "name": "yui-launcher",
-  "version": "2026.1107.5",
+  "version": "2026.1107.6",
   "private": true,
   "description": "Launch and update Yui apps",
   "main": "electron/main.cjs",
@@ -18,7 +18,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
-    "electron": "^44.5.1",
+    "electron": "^45.2.3",
     "electron-builder": "^26.15.3",
     "png-to-ico": "^3.0.2"
   },

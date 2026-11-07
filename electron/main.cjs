@@ -7,6 +7,7 @@ const { createService } = require('./service.cjs');
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const RUNNING_INTERVAL_MS = 5000;
+const SUPPORT_URL = 'https://suzunayui.fanbox.cc/';
 
 let window = null;
 let service = null;
@@ -47,6 +48,7 @@ function registerIpc() {
     const url = service.releasePageUrl(id);
     return url ? shell.openExternal(url) : undefined;
   });
+  handle('support:open', () => shell.openExternal(SUPPORT_URL));
   handle('self:install', () => {
     if (!selfUpdateReady || service.isBusy()) return;
     require('electron-updater').autoUpdater.quitAndInstall();

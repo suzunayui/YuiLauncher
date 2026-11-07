@@ -183,6 +183,7 @@ function render(state) {
 }
 
 elements.check.addEventListener('click', () => window.launcher.check());
+document.getElementById('support').addEventListener('click', () => window.launcher.openSupportPage());
 elements.dialogCancel.addEventListener('click', () => {
   pendingConfirm = null;
   elements.dialog.close();

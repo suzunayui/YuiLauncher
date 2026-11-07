@@ -42,6 +42,17 @@ async function main() {
     assert.equal(overflow, false, 'no horizontal scroll');
     await shot(page, '1-update-available');
 
+    // Records the URL instead of opening a real browser.
+    await app.evaluate(({ shell }) => {
+      global.openedUrls = [];
+      shell.openExternal = async url => { global.openedUrls.push(url); };
+    });
+    const support = page.getByRole('button', { name: 'FANBOXで応援する' });
+    const lastCard = await page.locator('.card').last().boundingBox();
+    assert.ok((await support.boundingBox()).y > lastCard.y + lastCard.height, 'the link is below the apps');
+    await support.click();
+    assert.deepEqual(await app.evaluate(() => global.openedUrls), ['https://suzunayui.fanbox.cc/']);
+
     const setWidth = width => app.evaluate(({ BrowserWindow }, value) => {
       const [window] = BrowserWindow.getAllWindows();
       window.setContentSize(value, window.getContentSize()[1]);

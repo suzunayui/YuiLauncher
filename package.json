@@ -1,6 +1,6 @@
 {
   "name": "yui-launcher",
-  "version": "2026.1107.6",
+  "version": "2026.1107.7",
   "private": true,
   "description": "Launch and update Yui apps",
   "main": "electron/main.cjs",

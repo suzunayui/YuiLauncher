@@ -293,6 +293,13 @@ h2.name {
   color: var(--accent-soft-text);
 }
 
+.support {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
 .dialog {
   width: min(420px, calc(100vw - 48px));
   padding: 20px;

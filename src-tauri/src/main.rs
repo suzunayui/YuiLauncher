@@ -24,6 +24,8 @@ use self_update::{SelfUpdater, SelfView, Updater};
 use serde::Serialize;
 use service::{Service, StateView};
 use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::thread;
@@ -173,14 +175,39 @@ fn start_detached(file: &Path, restart: bool) -> Result<(), String> {
     let bundle = bundle.ok_or("YuiLauncher.app から起動していません")?.to_path_buf();
     macos::install_from(file, "YuiLauncher.app", &bundle)?;
     if restart {
-        let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"";
+        let log = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+            .join("Library/Logs/com.suzunayui.yuilauncher/restart.log");
+        let script = "exec >>\"$3\" 2>&1; echo \"$(date) waiting for $1\"; \
+            while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; \
+            echo \"$(date) opening $2\"; open \"$2\"; echo \"$(date) open exited with $?\"; \
+            sleep 3; if ! pgrep -f \"$2/Contents/MacOS/\" >/dev/null; then \
+            echo \"$(date) not running, opening a new instance\"; open -n \"$2\"; echo \"$(date) open -n exited with $?\"; fi";
         Command::new("sh")
             .args(["-c", script, "sh", &std::process::id().to_string()])
             .arg(&bundle)
+            .arg(&log)
+            .stdin(std::process::Stdio::null())
             .spawn()
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+/// For reproducing the restart in a debug build without a newer release:
+/// open --env YUI_LAUNCHER_RESTART_PROBE=<downloaded zip> YuiLauncher.app
+#[cfg(all(debug_assertions, target_os = "macos"))]
+fn restart_probe(app: &AppHandle) {
+    let Some(zip) = std::env::var_os("YUI_LAUNCHER_RESTART_PROBE") else { return };
+    let handle = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(3));
+        match start_detached(Path::new(&zip), true) {
+            Ok(()) => handle.exit(0),
+            Err(error) => eprintln!("restart probe failed: {error}"),
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -310,6 +337,8 @@ fn set_up(app: &AppHandle) -> tauri::Result<()> {
         thread::sleep(RUNNING_INTERVAL);
         service(&handle).refresh_running();
     });
+    #[cfg(all(debug_assertions, target_os = "macos"))]
+    restart_probe(app);
     Ok(())
 }
 

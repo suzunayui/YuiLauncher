@@ -226,9 +226,11 @@ struct Backend {
     downloader: Arc<dyn Downloader>,
 }
 
-fn real_backend() -> Backend {
-    let releases = GitHub::new().expect("failed to set up TLS");
-    Backend { system: real_system(), releases: Arc::new(releases), downloader: Arc::new(HttpDownloader) }
+/// The release cache lives in a file, so a restart asks GitHub only whether anything changed.
+fn real_backend(app: &AppHandle) -> tauri::Result<Backend> {
+    let cache_file = app.path().app_cache_dir()?.join("github-releases.json");
+    let releases = GitHub::new().expect("failed to set up TLS").with_cache_file(cache_file);
+    Ok(Backend { system: real_system(), releases: Arc::new(releases), downloader: Arc::new(HttpDownloader) })
 }
 
 fn set_up(app: &AppHandle) -> tauri::Result<()> {
@@ -238,10 +240,10 @@ fn set_up(app: &AppHandle) -> tauri::Result<()> {
         app.manage(fake.clone());
         (Backend { system: fake.clone(), releases: fake.clone(), downloader: fake.clone() }, Some(fake))
     } else {
-        (real_backend(), None)
+        (real_backend(app)?, None)
     };
     #[cfg(not(debug_assertions))]
-    let backend = real_backend();
+    let backend = real_backend(app)?;
 
     let handle = app.clone();
     let apps_service = Service::new(

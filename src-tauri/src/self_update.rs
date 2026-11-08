@@ -3,7 +3,7 @@
 
 use crate::catalog::LAUNCHER;
 use crate::download::Downloader;
-use crate::releases::{expected_checksum, Release, Releases};
+use crate::releases::{expected_checksum, Release, Releases, RATE_LIMITED};
 use crate::version::compare_versions;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -125,8 +125,11 @@ impl SelfUpdater {
 
     fn fail(self: &Arc<Self>, detail: &str, downloading: bool) {
         self.log("ERROR", detail);
-        // The page sees a plain message: the details can hold URLs and paths.
-        let message = if downloading {
+        // The page sees a plain message: the details can hold URLs and paths. A rate limit
+        // message holds neither, and says how long to wait, so it is shown as it is.
+        let message = if detail.starts_with(RATE_LIMITED) {
+            detail
+        } else if downloading {
             "YuiLauncherの更新をダウンロードできませんでした。しばらくしてからもう一度お試しください。"
         } else {
             "YuiLauncherの更新を確認できませんでした。しばらくしてからもう一度お試しください。"
@@ -136,10 +139,13 @@ impl SelfUpdater {
             view.percent = None;
             view.error = Some(message.to_string());
         });
+        // A refused check is tried again just after GitHub takes requests again.
+        let lifted = self.updater.as_ref().and_then(|updater| updater.releases.retry_after());
+        let wait = lifted.map_or(self.retry_after, |wait| wait + Duration::from_secs(5));
         let generation = self.state.lock().unwrap().generation;
         let this = self.clone();
         thread::spawn(move || {
-            thread::sleep(this.retry_after);
+            thread::sleep(wait);
             if this.state.lock().unwrap().generation == generation {
                 this.check();
             }
@@ -280,6 +286,7 @@ mod tests {
         runs: Vec<bool>,
         run_error: Option<String>,
         hold_check: Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>,
+        retry_after: Option<Duration>,
     }
 
     struct Fake(Mutex<World>);
@@ -309,6 +316,9 @@ mod tests {
         }
         fn fetch_text(&self, _: &str) -> Result<String, String> {
             Ok(self.0.lock().unwrap().checksums.clone().unwrap_or_else(|| format!("{HASH}  YuiLauncher-Setup-1.1.0.exe\n")))
+        }
+        fn retry_after(&self) -> Option<Duration> {
+            self.0.lock().unwrap().retry_after
         }
     }
 
@@ -404,6 +414,30 @@ mod tests {
     fn a_missing_release_counts_as_up_to_date() {
         let setup = setup(long(), |_| {});
         setup.updater.check();
+        assert_eq!(setup.updater.snapshot().phase, "latest");
+    }
+
+    #[test]
+    fn a_rate_limit_says_how_long_to_wait_and_checks_again_once_it_lifts() {
+        let limited = format!("{RATE_LIMITED}約19分後にもう一度お試しください。");
+        let setup = setup(long(), |world| {
+            world.check_error = Some(limited.clone());
+            world.retry_after = Some(Duration::from_millis(1));
+        });
+        setup.updater.check();
+        assert_eq!(setup.updater.snapshot().error.as_deref(), Some(limited.as_str()));
+        {
+            let mut world = setup.fake.0.lock().unwrap();
+            world.check_error = None;
+            world.retry_after = None;
+        }
+        // The retry waits for the limit plus a few seconds, not for the half hour after other failures.
+        for _ in 0..800 {
+            if setup.updater.snapshot().phase == "latest" {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(setup.updater.snapshot().phase, "latest");
     }
 

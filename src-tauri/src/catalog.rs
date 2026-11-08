@@ -37,21 +37,41 @@ pub struct AppDef {
 pub const ON_MAC: bool = cfg!(target_os = "macos");
 
 impl AppDef {
-    /// The installer's name is the prefix, a version, then the suffix.
-    pub fn is_installer_for(&self, name: &str, mac: bool) -> bool {
-        let affixes = if mac {
+    fn installer_affixes(&self, mac: bool) -> Option<(&'static str, &'static str)> {
+        if mac {
             self.mac.as_ref().map(|mac| (mac.installer_prefix, mac.installer_suffix))
         } else {
             Some((self.installer_prefix, self.installer_suffix))
-        };
-        let Some((prefix, suffix)) = affixes else { return false };
+        }
+    }
+
+    /// The installer's name is the prefix, a version, then the suffix.
+    pub fn is_installer_for(&self, name: &str, mac: bool) -> bool {
+        let Some((prefix, suffix)) = self.installer_affixes(mac) else { return false };
         name.strip_prefix(prefix)
             .and_then(|rest| rest.strip_suffix(suffix))
             .is_some_and(|version| !version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.'))
     }
 
+    /// What this version's installer is called, if the app has one for this platform.
+    pub fn installer_name_for(&self, version: &str, mac: bool) -> Option<String> {
+        self.installer_affixes(mac).map(|(prefix, suffix)| format!("{prefix}{version}{suffix}"))
+    }
+
     pub fn is_checksums(&self, name: &str) -> bool {
         name.starts_with("SHA256SUMS") && name.ends_with(".txt")
+    }
+
+    /// The checksum files a release may hold, most specific first: the apps name them differently.
+    pub fn checksum_names_for(&self, version: &str, mac: bool) -> Vec<String> {
+        let mut names = Vec::new();
+        if mac {
+            names.push(format!("SHA256SUMS-{version}-mac-arm64.txt"));
+            names.push("SHA256SUMS-mac-arm64.txt".to_string());
+        }
+        names.push(format!("SHA256SUMS-{version}.txt"));
+        names.push("SHA256SUMS.txt".to_string());
+        names
     }
 
     pub fn uninstall_note(&self) -> &'static str {

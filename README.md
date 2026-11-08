@@ -76,13 +76,7 @@ npm run test:ui
 npm version 2026.1107.1 --no-git-tag-version
 ```
 
-```bash
-npm run dist
-```
-
-`release`にインストーラー、チェックサム、`latest.yml`が作られます。
-
-Mac版はMacでビルドします。Node.jsがないMacでは、Windowsで`node scripts/prepare-tauri-frontend.cjs`を実行して作った`src-tauri/frontend`を持っていき、次のようにします。
+先にMac版をMacでビルドします。Node.jsがないMacでは、Windowsで`node scripts/prepare-tauri-frontend.cjs`を実行して作った`src-tauri/frontend`を持っていき、次のようにします。
 
 ```bash
 cargo install tauri-cli --version "^2" --locked
@@ -96,4 +90,12 @@ cargo tauri build -c '{"build":{"beforeBuildCommand":""}}'
 scripts/package-mac.sh
 ```
 
-`release`に`YuiLauncher-<バージョン>-mac-arm64.zip`とそのチェックサムが作られます。WindowsとMacのファイルをすべて同じGitHub Releaseに公開します。
+`release`に`YuiLauncher-<バージョン>-mac-arm64.zip`が作られます。これをWindows側の`release`に置いてから、Windowsでビルドします。
+
+```bash
+npm run dist
+```
+
+`release`に、インストーラー、Mac版の`.zip`、チェックサム、`latest.yml`が揃います。この4つを同じGitHub Releaseに公開します。
+
+チェックサムは、WindowsとMacの分を必ず1つのファイルにまとめます。2026.1107.12以前のランチャーは、リリースにある最初のチェックサムファイルしか読みません。Mac用を別のファイルにすると、名前順でそちらが先に来るため、Windows版を検証できず更新できなくなります。

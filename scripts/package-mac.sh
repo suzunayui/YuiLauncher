@@ -1,6 +1,7 @@
 #!/bin/sh
-# Zips the built Mac app for a GitHub Release and writes its checksum to release/.
-# Run after `cargo tauri build` on a Mac.
+# Zips the built Mac app for a GitHub Release into release/. Run after `cargo tauri build`
+# on a Mac, then put the zip in the Windows checkout's release/ before `npm run dist`,
+# which writes one checksum file for both.
 set -eu
 cd "$(dirname "$0")/.."
 # Reads the first "version", whether package.json ends its lines with LF or CRLF.
@@ -15,5 +16,5 @@ mkdir -p release
 rm -f "release/$name"
 # ditto keeps the bundle's signature and symlinks intact, which zip does not.
 ditto -c -k --keepParent "$app" "release/$name"
-(cd release && shasum -a 256 "$name" > "SHA256SUMS-$version-mac-arm64.txt")
 echo "Packaged release/$name"
+shasum -a 256 "release/$name"

@@ -1180,7 +1180,7 @@ mod tests {
         let setup = setup(|_| {});
         let temp = temp_dir();
         let service = catalog_service(&setup.fake, &temp.join("settings.json"));
-        assert_eq!(ids(&service), ["yuitracking", "yuivoicechanger", "yuilivekit"]);
+        assert_eq!(ids(&service), ["yuitracking", "yuivoicechanger", "yuilivekit", "yuiclock"]);
     }
 
     #[test]
@@ -1190,8 +1190,8 @@ mod tests {
         let file = temp.join("nested").join("settings.json");
         let service = catalog_service(&setup.fake, &file);
         service.set_order(&["yuilivekit".to_string(), "yuitracking".to_string(), "yuivoicechanger".to_string()]).unwrap();
-        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
-        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger", "yuiclock"]);
+        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuilivekit", "yuitracking", "yuivoicechanger", "yuiclock"]);
     }
 
     #[test]
@@ -1201,7 +1201,7 @@ mod tests {
         let service = catalog_service(&setup.fake, &temp.join("settings.json"));
         let chosen = ["nope", "yuilivekit", "yuilivekit"].map(str::to_string);
         service.set_order(&chosen).unwrap();
-        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger"]);
+        assert_eq!(ids(&service), ["yuilivekit", "yuitracking", "yuivoicechanger", "yuiclock"]);
     }
 
     fn hidden_ids(service: &Service) -> Vec<&'static str> {
@@ -1223,7 +1223,7 @@ mod tests {
 
         let restarted = catalog_service(&setup.fake, &file);
         assert_eq!(hidden_ids(&restarted), ["yuitracking"]);
-        assert_eq!(ids(&restarted), ["yuilivekit", "yuitracking", "yuivoicechanger"], "hiding keeps the order");
+        assert_eq!(ids(&restarted), ["yuilivekit", "yuitracking", "yuivoicechanger", "yuiclock"], "hiding keeps the order");
         assert!(setup.service.set_hidden("nope", true).is_err());
     }
 
@@ -1243,7 +1243,7 @@ mod tests {
         let temp = temp_dir();
         let file = temp.join("settings.json");
         std::fs::write(&file, "{not json").unwrap();
-        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuitracking", "yuivoicechanger", "yuilivekit"]);
+        assert_eq!(ids(&catalog_service(&setup.fake, &file)), ["yuitracking", "yuivoicechanger", "yuilivekit", "yuiclock"]);
     }
 
     #[test]

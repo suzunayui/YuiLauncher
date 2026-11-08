@@ -4,6 +4,7 @@
 #[derive(Clone, Copy)]
 pub struct MacDef {
     /// The bundle's folder name in /Applications.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub bundle: &'static str,
     /// The release asset is the prefix, a version, then the suffix: a .zip or .dmg holding the bundle.
     pub installer_prefix: &'static str,
@@ -61,7 +62,7 @@ impl AppDef {
     }
 }
 
-pub static APPS: [AppDef; 3] = [
+pub static APPS: [AppDef; 4] = [
     AppDef {
         id: "yuitracking",
         name: "YuiTracking",
@@ -118,6 +119,22 @@ pub static APPS: [AppDef; 3] = [
         uninstall_args: &["/S"],
         uninstall_note: "コメント、設定、字幕用のモデルなどのデータは残ります。",
         icon: "../assets/apps/YuiLiveKit.ico",
+        mac: None,
+    },
+    AppDef {
+        id: "yuiclock",
+        name: "YuiClock",
+        description: "デスクトップに置いておけるデジタル時計",
+        repo: "suzunayui/YuiClock",
+        registry_key: "YuiClock",
+        exe_name: "YuiClock.exe",
+        installer_prefix: "YuiClock-Setup-",
+        installer_suffix: ".exe",
+        silent_args: &["/S"],
+        update_args: &["/UPDATE"],
+        uninstall_args: &["/S"],
+        uninstall_note: "位置、色、フォントなどの設定は残ります。",
+        icon: "../assets/apps/YuiClock.ico",
         mac: None,
     },
 ];

@@ -43,6 +43,7 @@ impl Fixture {
                 ("yuitracking", app("2026.1106.5", true, "2026.1107.1", "YuiTracking-Setup-2026.1107.1-x64.exe")),
                 ("yuivoicechanger", app("2026.1104.31", false, "2026.1104.31", "YuiVoiceChanger-Setup-2026.1104.31.exe")),
                 ("yuilivekit", app("2026.1107.1", false, "2026.1107.1", "YuiLiveKit-Setup-2026.1107.1.exe")),
+                ("yuiclock", app("2026.1108.1", false, "2026.1108.1", "YuiClock-Setup-2026.1108.1.exe")),
             ])),
             recorded: Mutex::new(Recorded::default()),
         }

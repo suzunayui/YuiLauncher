@@ -4882,7 +4882,7 @@ dependencies = [
 
 [[package]]
 name = "yui-launcher"
-version = "2026.1108.3"
+version = "2026.1110.1"
 dependencies = [
  "native-tls",
  "objc2-app-kit",

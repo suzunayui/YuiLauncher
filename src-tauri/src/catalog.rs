@@ -157,7 +157,12 @@ pub static APPS: [AppDef; 4] = [
         uninstall_args: &["/S"],
         uninstall_note: "位置、色、フォントなどの設定は残ります。",
         icon: "../assets/apps/YuiClock.ico",
-        mac: None,
+        mac: Some(MacDef {
+            bundle: "YuiClock.app",
+            installer_prefix: "YuiClock-",
+            installer_suffix: "-mac-arm64.zip",
+            uninstall_note: "アプリはゴミ箱に移動します。位置、色、フォントなどの設定は残ります。",
+        }),
     },
 ];
 
